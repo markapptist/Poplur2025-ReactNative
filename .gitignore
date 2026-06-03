@@ -1,0 +1,17 @@
+node_modules/
+.expo/
+dist/
+build/
+*.log
+.DS_Store
+ios/Pods/
+ios/build/
+ios/DerivedData/
+ios/*.xcworkspace/xcuserdata/
+ios/*.xcodeproj/project.xcworkspace/xcuserdata/
+ios/*.xcodeproj/xcuserdata/
+android/.gradle/
+android/.idea/
+android/build/
+android/app/build/
+android/local.properties

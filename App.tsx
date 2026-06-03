@@ -1,0 +1,69 @@
+import 'react-native-gesture-handler';
+import React, { useEffect, useState } from 'react';
+import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import { NavigationContainer } from '@react-navigation/native';
+import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { onAuthStateChanged, User } from 'firebase/auth';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { StatusBar } from 'expo-status-bar';
+import { auth } from './src/services/firebase';
+import { WelcomeScreen } from './src/screens/WelcomeScreen';
+import { LoginScreen } from './src/screens/LoginScreen';
+import { SignUpScreen } from './src/screens/SignUpScreen';
+import { FeedScreen } from './src/screens/FeedScreen';
+import { MapScreen } from './src/screens/MapScreen';
+import { CameraScreen } from './src/screens/CameraScreen';
+import { ProfileScreen } from './src/screens/ProfileScreen';
+import { SettingsScreen } from './src/screens/SettingsScreen';
+import { PoplurCube } from './src/components/PoplurCube';
+import type { AppTab } from './src/types/models';
+
+const Stack = createNativeStackNavigator();
+
+export default function App() {
+  const [user, setUser] = useState<User | null | undefined>(undefined);
+  const [authError, setAuthError] = useState<string | null>(null);
+
+  useEffect(() => {
+    try {
+      return onAuthStateChanged(auth, setUser, error => {
+        setAuthError(error.message);
+        setUser(null);
+      });
+    } catch (error: any) {
+      setAuthError(error.message);
+      setUser(null);
+    }
+  }, []);
+
+  if (user === undefined) return <View style={styles.loading}><ActivityIndicator color="white" /><Text style={styles.loadingText}>Loading Poplur...</Text></View>;
+
+  return <SafeAreaProvider><NavigationContainer><StatusBar style="light" />{user ? <MainApp /> : <AuthStack authError={authError} />}</NavigationContainer></SafeAreaProvider>;
+}
+
+function AuthStack({ authError }: { authError: string | null }) {
+  return <Stack.Navigator screenOptions={{ headerShown: false, contentStyle: { backgroundColor: '#050713' } }}>
+    <Stack.Screen name="Welcome">{props => <WelcomeScreen {...props} authError={authError} />}</Stack.Screen>
+    <Stack.Screen name="Login" component={LoginScreen} />
+    <Stack.Screen name="SignUp" component={SignUpScreen} />
+  </Stack.Navigator>;
+}
+
+function MainApp() {
+  const [tab, setTab] = useState<AppTab>('feed');
+  return <View style={styles.main}>
+    {tab === 'feed' && <FeedScreen />}
+    {tab === 'map' && <MapScreen />}
+    {tab === 'record' && <CameraScreen />}
+    {tab === 'profile' && <ProfileScreen />}
+    {tab === 'settings' && <SettingsScreen />}
+    <View style={styles.cubeLayer}><PoplurCube activeTab={tab} onTabChange={setTab} /></View>
+  </View>;
+}
+
+const styles = StyleSheet.create({
+  loading: { flex: 1, backgroundColor: '#050713', alignItems: 'center', justifyContent: 'center' },
+  loadingText: { color: 'rgba(255,255,255,0.72)', marginTop: 12, fontWeight: '700' },
+  main: { flex: 1, backgroundColor: '#050713' },
+  cubeLayer: { position: 'absolute', left: 0, right: 0, bottom: 0, height: 230, alignItems: 'center', justifyContent: 'center', pointerEvents: 'box-none' }
+});

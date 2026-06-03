@@ -1,0 +1,28 @@
+{
+  "expo": {
+    "name": "Poplur2025",
+    "slug": "poplur2025-react-native",
+    "scheme": "poplur2025",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "ios": {
+      "bundleIdentifier": "com.apptist.Poplur2025.reactnative",
+      "supportsTablet": false,
+      "infoPlist": {
+        "NSCameraUsageDescription": "Poplur needs camera access so you can record location-based posts.",
+        "NSMicrophoneUsageDescription": "Poplur needs microphone access to record videos.",
+        "NSPhotoLibraryUsageDescription": "Poplur needs photo library access so you can choose media to post.",
+        "NSLocationWhenInUseUsageDescription": "Poplur needs your location to show nearby posts on the map."
+      }
+    },
+    "android": {
+      "package": "com.apptist.poplur2025.reactnative",
+      "permissions": ["CAMERA", "RECORD_AUDIO", "ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION", "READ_MEDIA_IMAGES", "READ_MEDIA_VIDEO"]
+    },
+    "plugins": ["expo-camera", "expo-image-picker", "expo-location"],
+    "extra": {
+      "firebaseProjectId": "poplur2025"
+    }
+  }
+}
