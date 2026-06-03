@@ -123,9 +123,14 @@ android {
             crunchPngs (findProperty('android.enablePngCrunchInReleaseBuilds')?.toBoolean() ?: true)
         }
     }
-    packagingOptions {
+    packaging {
         jniLibs {
             useLegacyPackaging (findProperty('expo.useLegacyPackaging')?.toBoolean() ?: false)
+        }
+        resources {
+            pickFirsts += "assets/app.config"
+            pickFirsts += "**/assets/app.config"
+            pickFirsts += "**/app.config"
         }
     }
     androidResources {
