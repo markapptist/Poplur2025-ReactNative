@@ -1,11 +1,20 @@
 {
   "expo": {
-    "name": "Poplur2025",
+    "name": "Poplur",
     "slug": "poplur2025-react-native",
     "scheme": "poplur2025",
     "version": "1.0.0",
     "orientation": "portrait",
+    "icon": "./src/assets/icon-1024x1024.png",
     "userInterfaceStyle": "dark",
+    "web": {
+      "favicon": "./src/assets/favicon.ico",
+      "name": "Poplur",
+      "shortName": "Poplur",
+      "description": "Poplur - location-based social app",
+      "themeColor": "#E6120F",
+      "backgroundColor": "#160226"
+    },
     "ios": {
       "bundleIdentifier": "com.apptist.Poplur2025.reactnative",
       "supportsTablet": false,
@@ -18,6 +27,10 @@
     },
     "android": {
       "package": "com.apptist.poplur2025.reactnative",
+      "adaptiveIcon": {
+        "foregroundImage": "./src/assets/icon-1024x1024.png",
+        "backgroundColor": "#160226"
+      },
       "permissions": ["CAMERA", "RECORD_AUDIO", "ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION", "READ_MEDIA_IMAGES", "READ_MEDIA_VIDEO"]
     },
     "plugins": ["expo-camera", "expo-image-picker", "expo-location"],

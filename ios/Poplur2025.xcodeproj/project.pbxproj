@@ -59,12 +59,12 @@
 				BB2F792B24A3F905000567C9 /* Supporting */,
 				13B07FAF1A68108700A75B9A /* AppDelegate.h */,
 				13B07FB01A68108700A75B9A /* AppDelegate.mm */,
-					13B07FB51A68108700A75B9A /* Images.xcassets */,
-					13B07FB61A68108700A75B9A /* Info.plist */,
-					13B07FB71A68108700A75B9A /* main.m */,
-					4D9B2D796B3F4F54B69C3C8C /* PoplurNativeCubeManager.m */,
-					4E6A1D3D9BC74B6E902B31D0 /* PoplurNativeConfettiManager.m */,
-					AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */,
+				13B07FB51A68108700A75B9A /* Images.xcassets */,
+				13B07FB61A68108700A75B9A /* Info.plist */,
+				13B07FB71A68108700A75B9A /* main.m */,
+				4D9B2D796B3F4F54B69C3C8C /* PoplurNativeCubeManager.m */,
+				4E6A1D3D9BC74B6E902B31D0 /* PoplurNativeConfettiManager.m */,
+				AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */,
 				E2D856E3884F499895C3B268 /* noop-file.swift */,
 				CBD3F498B34A48B5AA86EABE /* Poplur2025-Bridging-Header.h */,
 				7F3262F6E8A7550CBD5EF0B9 /* PrivacyInfo.xcprivacy */,
@@ -336,11 +336,11 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-					13B07FBC1A68108700A75B9A /* AppDelegate.mm in Sources */,
-					13B07FC11A68108700A75B9A /* main.m in Sources */,
-					4D9B2D7A6B3F4F54B69C3C8C /* PoplurNativeCubeManager.m in Sources */,
-					4E6A1D3E9BC74B6E902B31D0 /* PoplurNativeConfettiManager.m in Sources */,
-					B18059E884C0ABDD17F3DC3D /* ExpoModulesProvider.swift in Sources */,
+				13B07FBC1A68108700A75B9A /* AppDelegate.mm in Sources */,
+				13B07FC11A68108700A75B9A /* main.m in Sources */,
+				4D9B2D7A6B3F4F54B69C3C8C /* PoplurNativeCubeManager.m in Sources */,
+				4E6A1D3E9BC74B6E902B31D0 /* PoplurNativeConfettiManager.m in Sources */,
+				B18059E884C0ABDD17F3DC3D /* ExpoModulesProvider.swift in Sources */,
 				589170DD001942A08129D709 /* noop-file.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
