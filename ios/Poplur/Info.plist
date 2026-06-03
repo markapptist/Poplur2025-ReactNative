@@ -34,8 +34,6 @@
     </array>
     <key>CFBundleVersion</key>
     <string>1</string>
-    <key>GoogleMapsApiKey</key>
-    <string>AIzaSyC_b3-zHngzP-MKa1Cx5yclbV_6DlvGe_w</string>
     <key>LSMinimumSystemVersion</key>
     <string>12.0</string>
     <key>LSRequiresIPhoneOS</key>

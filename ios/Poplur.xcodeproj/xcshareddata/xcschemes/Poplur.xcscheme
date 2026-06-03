@@ -15,9 +15,9 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "13B07F861A680F5B00A75B9A"
-               BuildableName = "Poplur2025.app"
-               BlueprintName = "Poplur2025"
-               ReferencedContainer = "container:Poplur2025.xcodeproj">
+               BuildableName = "Poplur.app"
+               BlueprintName = "Poplur"
+               ReferencedContainer = "container:Poplur.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
       </BuildActionEntries>
@@ -33,9 +33,9 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "00E356ED1AD99517003FC87E"
-               BuildableName = "Poplur2025Tests.xctest"
-               BlueprintName = "Poplur2025Tests"
-               ReferencedContainer = "container:Poplur2025.xcodeproj">
+               BuildableName = "PoplurTests.xctest"
+               BlueprintName = "PoplurTests"
+               ReferencedContainer = "container:Poplur.xcodeproj">
             </BuildableReference>
          </TestableReference>
       </Testables>
@@ -55,9 +55,9 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "13B07F861A680F5B00A75B9A"
-            BuildableName = "Poplur2025.app"
-            BlueprintName = "Poplur2025"
-            ReferencedContainer = "container:Poplur2025.xcodeproj">
+            BuildableName = "Poplur.app"
+            BlueprintName = "Poplur"
+            ReferencedContainer = "container:Poplur.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </LaunchAction>
@@ -72,9 +72,9 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "13B07F861A680F5B00A75B9A"
-            BuildableName = "Poplur2025.app"
-            BlueprintName = "Poplur2025"
-            ReferencedContainer = "container:Poplur2025.xcodeproj">
+            BuildableName = "Poplur.app"
+            BlueprintName = "Poplur"
+            ReferencedContainer = "container:Poplur.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </ProfileAction>
