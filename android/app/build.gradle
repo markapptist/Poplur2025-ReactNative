@@ -128,9 +128,8 @@ android {
             useLegacyPackaging (findProperty('expo.useLegacyPackaging')?.toBoolean() ?: false)
         }
         resources {
-            pickFirsts += "assets/app.config"
-            pickFirsts += "**/assets/app.config"
-            pickFirsts += "**/app.config"
+            pickFirsts.add("assets/app.config")
+            pickFirsts.add("**/app.config")
         }
     }
     androidResources {
