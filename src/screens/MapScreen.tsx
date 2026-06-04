@@ -1,44 +1,85 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
-import MapView, { Circle, Marker, PROVIDER_GOOGLE, Region } from 'react-native-maps';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Alert, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import MapView, { Camera, Circle, LatLng, Marker, PROVIDER_DEFAULT, PROVIDER_GOOGLE } from 'react-native-maps';
 import * as Location from 'expo-location';
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
 import { fetchRecentPosts, uploadPostMedia } from '../services/posts';
 import type { Post } from '../types/models';
 
-const toronto: Region = { latitude: 43.6532, longitude: -79.3832, latitudeDelta: 0.08, longitudeDelta: 0.08 };
+const toronto: LatLng = { latitude: 43.6532, longitude: -79.3832 };
+const earthRadiusKm = 6371;
+
+const worldCamera: Camera = {
+  center: { latitude: 18, longitude: -100 },
+  altitude: 65000000,
+  heading: 0,
+  pitch: 0,
+  zoom: 1
+};
+
+function locationCamera(coordinate: LatLng): Partial<Camera> {
+  return {
+    center: coordinate,
+    altitude: Platform.OS === 'ios' ? 900 : undefined,
+    heading: 28,
+    pitch: Platform.OS === 'ios' ? 68 : 58,
+    zoom: Platform.OS === 'android' ? 18 : undefined
+  };
+}
 
 export function MapScreen() {
-  const [region, setRegion] = useState<Region>(toronto);
+  const mapRef = useRef<MapView | null>(null);
+  const autoZoomedRef = useRef(false);
   const [posts, setPosts] = useState<Post[]>([]);
-  const [selected, setSelected] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [selected, setSelected] = useState<LatLng | null>(null);
+  const [currentLocation, setCurrentLocation] = useState<LatLng | null>(null);
   const [uploading, setUploading] = useState(false);
   const [mapReady, setMapReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const mapStyle = useMemo(() => [{ elementType: 'geometry', stylers: [{ color: '#111827' }] }, { elementType: 'labels.text.fill', stylers: [{ color: '#9ca3af' }] }, { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#1f2937' }] }], []);
+  const mappedPosts = useMemo(() => posts.filter(post => post.latitude != null && post.longitude != null), [posts]);
+  const totalViews = useMemo(() => mappedPosts.reduce((sum, post) => sum + post.viewCount, 0), [mappedPosts]);
+  const radiusKm = selected ? Math.max(0, Math.round(distanceKm(currentLocation ?? toronto, selected))) : 0;
+  const isAndroid = Platform.OS === 'android';
+  const mapType = Platform.OS === 'ios' ? 'hybridFlyover' : 'hybrid';
 
   const load = useCallback(async () => {
     setError(null);
     try {
-      setPosts((await fetchRecentPosts()).filter(p => p.latitude && p.longitude));
+      setPosts(await fetchRecentPosts());
     } catch (e: any) {
       setError(e.message ?? 'Map posts could not be loaded.');
     }
   }, []);
+
+  const flyToLocation = useCallback((coordinate: LatLng, duration = 2600) => {
+    mapRef.current?.animateCamera(locationCamera(coordinate), { duration });
+  }, []);
+
   useEffect(() => { load(); }, [load]);
+
   useEffect(() => { (async () => {
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status === 'granted') {
         const loc = await Location.getCurrentPositionAsync({});
-        setRegion({ latitude: loc.coords.latitude, longitude: loc.coords.longitude, latitudeDelta: 0.06, longitudeDelta: 0.06 });
+        const coordinate = { latitude: loc.coords.latitude, longitude: loc.coords.longitude };
+        setCurrentLocation(coordinate);
+        setSelected(coordinate);
+        if (mapReady) flyToLocation(coordinate);
       }
     } catch (e: any) {
       setError(e.message ?? 'Location could not be loaded.');
     }
-  })(); }, []);
+  })(); }, [flyToLocation, mapReady]);
+
+  useEffect(() => {
+    if (!mapReady || autoZoomedRef.current) return;
+    autoZoomedRef.current = true;
+    const timer = setTimeout(() => flyToLocation(currentLocation ?? toronto), 900);
+    return () => clearTimeout(timer);
+  }, [currentLocation, flyToLocation, mapReady]);
 
   async function chooseMediaForMap() {
     if (!selected) return Alert.alert('Pick a coordinate first', 'Tap the map where this post should live.');
@@ -53,21 +94,125 @@ export function MapScreen() {
     finally { setUploading(false); }
   }
 
+  function resetToGlobe() {
+    mapRef.current?.animateCamera(worldCamera, { duration: 1200 });
+    setTimeout(() => flyToLocation(currentLocation ?? toronto), 1450);
+  }
+
   return <View style={styles.fill}>
-    <MapView provider={PROVIDER_GOOGLE} customMapStyle={mapStyle} style={styles.fill} region={region} onMapReady={() => setMapReady(true)} onRegionChangeComplete={setRegion} showsUserLocation onPress={event => setSelected(event.nativeEvent.coordinate)}>
-      {posts.map(post => <React.Fragment key={post.id}>
-        <Marker coordinate={{ latitude: post.latitude!, longitude: post.longitude! }} title={post.username ?? 'Poplur'} description={`${Math.round(post.radius / 1000)} km · ${post.viewCount} views`} />
-        <Circle center={{ latitude: post.latitude!, longitude: post.longitude! }} radius={post.radius} strokeColor="rgba(99,102,241,0.9)" fillColor="rgba(99,102,241,0.18)" />
+    <MapView
+      ref={mapRef}
+      provider={isAndroid ? PROVIDER_GOOGLE : PROVIDER_DEFAULT}
+      mapType={mapType}
+      userInterfaceStyle="dark"
+      style={styles.fill}
+      initialCamera={worldCamera}
+      loadingEnabled
+      loadingBackgroundColor="#000"
+      loadingIndicatorColor="#fff"
+      moveOnMarkerPress={false}
+      showsBuildings
+      showsCompass={false}
+      showsMyLocationButton={false}
+      showsPointsOfInterest
+      showsScale={false}
+      showsUserLocation
+      onMapReady={() => setMapReady(true)}
+      onPress={event => setSelected(event.nativeEvent.coordinate)}
+    >
+      {mappedPosts.map((post, index) => <React.Fragment key={post.id}>
+        <Marker coordinate={{ latitude: post.latitude!, longitude: post.longitude! }} title={post.username ?? 'Poplur'} description={`${Math.round(post.radius / 1000)} km · ${post.viewCount} views`}>
+          <View style={[styles.postMarker, index % 2 === 0 ? styles.blueMarker : styles.pinkMarker]}>
+            <View style={styles.markerCore} />
+          </View>
+        </Marker>
+        <Circle center={{ latitude: post.latitude!, longitude: post.longitude! }} radius={post.radius} strokeColor="rgba(168,85,247,0.72)" fillColor="rgba(168,85,247,0.16)" />
       </React.Fragment>)}
-      {selected && <Marker coordinate={selected} pinColor="#f97316" title="New post location" />}
+      {selected && <Marker coordinate={selected} anchor={{ x: 0.5, y: 0.62 }} title="Selected location">
+        <View style={styles.selectedMarker}>
+          <Ionicons name="navigate" color="#7dd3fc" size={34} />
+        </View>
+      </Marker>}
     </MapView>
-    {!mapReady && <View style={styles.loading}><Text style={styles.loadingText}>Loading Google Maps...</Text></View>}
-    <View style={styles.panel}>
-      <Text style={styles.panelTitle}>{selected ? 'Coordinate selected' : 'Tap the map'}</Text>
-      <Text style={styles.panelText}>{error ?? (selected ? `${selected.latitude.toFixed(5)}, ${selected.longitude.toFixed(5)}` : 'Select where your photo or video should grow from.')}</Text>
-      <Pressable style={styles.button} onPress={chooseMediaForMap} disabled={uploading}><Ionicons name="cloud-upload" color="white" size={20} /><Text style={styles.buttonText}>{uploading ? 'Posting…' : 'Choose media & post'}</Text></Pressable>
+
+    {!mapReady && <View style={styles.loading}><Text style={styles.loadingText}>Loading hybrid map...</Text></View>}
+
+    <View pointerEvents="none" style={styles.header}>
+      <Text style={styles.title}>Your Location</Text>
+      <Text style={styles.subtitle}>Explore what's happening around you right now!</Text>
+      {error && <Text style={styles.error}>{error}</Text>}
+    </View>
+
+    <View pointerEvents="none" style={styles.trending}>
+      <Text style={styles.label}>TRENDING</Text>
+      <Ionicons name="arrow-up" color="#6ee36f" size={72} />
+      <View style={styles.whiteRule} />
+      <Text style={styles.count}>{totalViews}</Text>
+      <Text style={styles.caption}>posts</Text>
+    </View>
+
+    <View style={styles.actions}>
+      <Pressable style={styles.weather} onPress={resetToGlobe}>
+        <Ionicons name="rainy" color="white" size={48} />
+        <Text style={styles.weatherText}>Rain</Text>
+      </Pressable>
+      <Pressable style={styles.iconButton} onPress={chooseMediaForMap} disabled={uploading}>
+        <Ionicons name={uploading ? 'hourglass' : 'sparkles'} color="white" size={34} />
+      </Pressable>
+      <Pressable style={styles.iconButton} onPress={() => flyToLocation(currentLocation ?? toronto, 1200)}>
+        <Ionicons name="analytics-outline" color="white" size={34} />
+      </Pressable>
+    </View>
+
+    <View pointerEvents="none" style={styles.radius}>
+      <View style={styles.radiusHeader}>
+        <Text style={styles.label}>RADIUS</Text>
+        <Ionicons name="shield" color="#c98438" size={28} />
+      </View>
+      <Text style={styles.radiusCurrent}>{radiusKm}</Text>
+      <View style={styles.goldRule} />
+      <Text style={styles.radiusEarth}>{earthRadiusKm}</Text>
+      <Text style={styles.km}>km</Text>
     </View>
   </View>;
 }
 
-const styles = StyleSheet.create({ fill: { flex: 1 }, loading: { ...StyleSheet.absoluteFillObject, backgroundColor: '#050713', alignItems: 'center', justifyContent: 'center' }, loadingText: { color: 'white', fontWeight: '800' }, panel: { position: 'absolute', left: 16, right: 16, top: 62, backgroundColor: 'rgba(5,7,19,0.84)', borderRadius: 22, padding: 16, borderColor: 'rgba(255,255,255,0.18)', borderWidth: 1 }, panelTitle: { color: 'white', fontWeight: '900', fontSize: 18 }, panelText: { color: '#c7d2fe', marginTop: 5 }, button: { marginTop: 12, backgroundColor: '#4f46e5', borderRadius: 16, padding: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 }, buttonText: { color: 'white', fontWeight: '800' } });
+function distanceKm(from: LatLng, to: LatLng) {
+  const toRad = (value: number) => value * Math.PI / 180;
+  const lat1 = toRad(from.latitude);
+  const lat2 = toRad(to.latitude);
+  const deltaLat = toRad(to.latitude - from.latitude);
+  const deltaLon = toRad(to.longitude - from.longitude);
+  const a = Math.sin(deltaLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(deltaLon / 2) ** 2;
+  return earthRadiusKm * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+const styles = StyleSheet.create({
+  fill: { flex: 1, backgroundColor: '#000' },
+  loading: { ...StyleSheet.absoluteFillObject, backgroundColor: '#000', alignItems: 'center', justifyContent: 'center' },
+  loadingText: { color: 'white', fontWeight: '800' },
+  header: { position: 'absolute', left: 38, right: 28, top: 150 },
+  title: { color: 'white', fontSize: 36, lineHeight: 42, fontWeight: '900', textShadowColor: 'rgba(0,0,0,0.35)', textShadowOffset: { width: 0, height: 2 }, textShadowRadius: 8 },
+  subtitle: { color: 'white', fontSize: 30, lineHeight: 40, fontWeight: '800', marginTop: 10, textShadowColor: 'rgba(0,0,0,0.35)', textShadowOffset: { width: 0, height: 2 }, textShadowRadius: 8 },
+  error: { color: '#fecaca', fontSize: 14, fontWeight: '700', marginTop: 10 },
+  postMarker: { width: 84, height: 84, borderRadius: 42, alignItems: 'center', justifyContent: 'center', borderWidth: 8 },
+  blueMarker: { borderColor: 'rgba(125,211,252,0.52)', backgroundColor: 'rgba(14,165,233,0.16)' },
+  pinkMarker: { borderColor: 'rgba(232,121,249,0.52)', backgroundColor: 'rgba(217,70,239,0.18)' },
+  markerCore: { width: 24, height: 24, borderRadius: 12, borderWidth: 5, borderColor: 'rgba(255,255,255,0.72)' },
+  selectedMarker: { width: 78, height: 110, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(14,165,233,0.2)', borderRadius: 39, borderColor: 'rgba(125,211,252,0.6)', borderWidth: 2 },
+  trending: { position: 'absolute', left: 86, bottom: 214, alignItems: 'flex-start' },
+  label: { color: 'rgba(255,255,255,0.72)', fontSize: 20, fontWeight: '900', letterSpacing: 4 },
+  whiteRule: { width: 238, height: 4, backgroundColor: 'white', marginTop: 10 },
+  count: { color: 'white', fontSize: 64, lineHeight: 72, fontWeight: '900', marginTop: 6 },
+  caption: { color: 'rgba(255,255,255,0.72)', fontSize: 28, fontWeight: '900' },
+  actions: { position: 'absolute', right: 28, bottom: 320, alignItems: 'center', gap: 24 },
+  weather: { width: 116, minHeight: 120, borderRadius: 8, backgroundColor: 'rgba(0,0,0,0.42)', alignItems: 'center', justifyContent: 'center', paddingVertical: 14 },
+  weatherText: { color: 'white', fontWeight: '900', fontSize: 24, marginTop: 4 },
+  iconButton: { width: 86, height: 86, borderRadius: 43, backgroundColor: 'rgba(0,0,0,0.46)', alignItems: 'center', justifyContent: 'center' },
+  radius: { position: 'absolute', right: 36, bottom: 104, alignItems: 'flex-end' },
+  radiusHeader: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  radiusCurrent: { color: '#c98438', fontSize: 64, lineHeight: 76, fontWeight: '900', marginTop: 8 },
+  goldRule: { width: 212, height: 4, backgroundColor: '#c98438', marginTop: 6 },
+  radiusEarth: { color: 'white', fontSize: 56, lineHeight: 66, fontWeight: '900', marginTop: 6 },
+  km: { color: '#c98438', fontSize: 22, fontWeight: '900' }
+});
