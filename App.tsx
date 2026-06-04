@@ -25,15 +25,25 @@ export default function App() {
   const [authError, setAuthError] = useState<string | null>(null);
 
   useEffect(() => {
+    // Fall back to logged-out after 4 s so a slow/offline Firebase never
+    // leaves the app pinned on the loading screen.
+    const timeout = setTimeout(() => setUser(null), 4000);
+    let unsubscribe: (() => void) | undefined;
     try {
-      return onAuthStateChanged(auth, setUser, error => {
+      unsubscribe = onAuthStateChanged(auth, user => {
+        clearTimeout(timeout);
+        setUser(user);
+      }, error => {
+        clearTimeout(timeout);
         setAuthError(error.message);
         setUser(null);
       });
     } catch (error: any) {
+      clearTimeout(timeout);
       setAuthError(error.message);
       setUser(null);
     }
+    return () => { clearTimeout(timeout); unsubscribe?.(); };
   }, []);
 
   if (user === undefined) return <View style={styles.loading}><ActivityIndicator color="white" /><Text style={styles.loadingText}>Loading Poplur...</Text></View>;
