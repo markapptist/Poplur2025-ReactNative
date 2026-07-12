@@ -177,6 +177,9 @@ const styles = StyleSheet.create({
   signInText: {
     color: '#060606',
     fontSize: 19,
-    fontWeight: '900'
+    fontWeight: '900',
+    textShadowColor: 'rgba(0,0,0,0.16)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 1
   }
 });
