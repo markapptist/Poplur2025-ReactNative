@@ -1,5 +1,5 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { AccessibilityInfo, Animated, Easing, Pressable, SafeAreaView, StyleSheet, Text, View } from 'react-native';
+import React from 'react';
+import { Pressable, SafeAreaView, StyleSheet, Text, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import Svg, { Defs, LinearGradient, Stop, Text as SvgText } from 'react-native-svg';
 import { PoplurConfetti } from '../components/PoplurConfetti';
@@ -31,58 +31,16 @@ export function WelcomeScreen({ navigation, authError }: any) {
   );
 }
 
-const AnimatedLinearGradient = Animated.createAnimatedComponent(LinearGradient);
-
 function WelcomeButtonShaderText({ text }: { text: string }) {
-  const phase = useRef(new Animated.Value(0)).current;
-  const [reduceMotion, setReduceMotion] = useState(false);
-
-  useEffect(() => {
-    let mounted = true;
-    AccessibilityInfo.isReduceMotionEnabled().then(enabled => {
-      if (mounted) setReduceMotion(enabled);
-    });
-    const subscription = AccessibilityInfo.addEventListener('reduceMotionChanged', setReduceMotion);
-    return () => {
-      mounted = false;
-      subscription.remove();
-    };
-  }, []);
-
-  useEffect(() => {
-    if (reduceMotion) {
-      phase.stopAnimation();
-      phase.setValue(0.48);
-      return;
-    }
-
-    phase.setValue(0);
-    const animation = Animated.loop(
-      Animated.timing(phase, {
-        toValue: 1,
-        duration: 3200,
-        easing: Easing.linear,
-        useNativeDriver: false
-      })
-    );
-    animation.start();
-    return () => animation.stop();
-  }, [phase, reduceMotion]);
-
-  // The 90pt label uses a 270pt (300%) gradient field. CSS 105deg maps to a
-  // 15deg SVG vector, and the field travels from +100% to -200% in one loop.
-  const x1 = phase.interpolate({ inputRange: [0, 1], outputRange: [90, -180] });
-  const x2 = phase.interpolate({ inputRange: [0, 1], outputRange: [360, 90] });
-
   return (
     <Svg width={90} height={30} viewBox="0 0 90 30" accessible={false} pointerEvents="none">
       <Defs>
-        <AnimatedLinearGradient
+        <LinearGradient
           id="welcomeButtonTextShader"
           gradientUnits="userSpaceOnUse"
-          x1={x1}
+          x1={-39.6}
           y1={-21}
-          x2={x2}
+          x2={230.4}
           y2={51}
         >
           <Stop offset={0} stopColor="#080207" />
@@ -93,7 +51,7 @@ function WelcomeButtonShaderText({ text }: { text: string }) {
           <Stop offset={0.76} stopColor="#ff4d9e" />
           <Stop offset={0.9} stopColor="#2a0a1d" />
           <Stop offset={1} stopColor="#080207" />
-        </AnimatedLinearGradient>
+        </LinearGradient>
       </Defs>
       <SvgText
         x={45}
