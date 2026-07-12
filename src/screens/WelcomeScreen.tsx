@@ -1,6 +1,7 @@
-import React from 'react';
-import { Pressable, SafeAreaView, StyleSheet, Text, View } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { AccessibilityInfo, Animated, Easing, Pressable, SafeAreaView, StyleSheet, Text, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import Svg, { Defs, LinearGradient, Stop, Text as SvgText } from 'react-native-svg';
 import { PoplurConfetti } from '../components/PoplurConfetti';
 
 const dotRows = Array.from({ length: 22 });
@@ -22,11 +23,100 @@ export function WelcomeScreen({ navigation, authError }: any) {
           style={({ pressed }) => [styles.signInShadow, pressed && styles.pressed]}
         >
           <View style={styles.signInButton}>
-            <Text style={styles.signInText}>Sign In</Text>
+            <WelcomeButtonShaderText text="Sign In" />
           </View>
         </Pressable>
       </View>
     </SafeAreaView>
+  );
+}
+
+const AnimatedLinearGradient = Animated.createAnimatedComponent(LinearGradient);
+
+function WelcomeButtonShaderText({ text }: { text: string }) {
+  const phase = useRef(new Animated.Value(0)).current;
+  const [reduceMotion, setReduceMotion] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+    AccessibilityInfo.isReduceMotionEnabled().then(enabled => {
+      if (mounted) setReduceMotion(enabled);
+    });
+    const subscription = AccessibilityInfo.addEventListener('reduceMotionChanged', setReduceMotion);
+    return () => {
+      mounted = false;
+      subscription.remove();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (reduceMotion) {
+      phase.stopAnimation();
+      phase.setValue(0.48);
+      return;
+    }
+
+    phase.setValue(0);
+    const animation = Animated.loop(
+      Animated.timing(phase, {
+        toValue: 1,
+        duration: 3200,
+        easing: Easing.linear,
+        useNativeDriver: false
+      })
+    );
+    animation.start();
+    return () => animation.stop();
+  }, [phase, reduceMotion]);
+
+  // The 90pt label uses a 270pt (300%) gradient field. CSS 105deg maps to a
+  // 15deg SVG vector, and the field travels from +100% to -200% in one loop.
+  const x1 = phase.interpolate({ inputRange: [0, 1], outputRange: [90, -180] });
+  const x2 = phase.interpolate({ inputRange: [0, 1], outputRange: [360, 90] });
+
+  return (
+    <Svg width={90} height={30} viewBox="0 0 90 30" accessible={false} pointerEvents="none">
+      <Defs>
+        <AnimatedLinearGradient
+          id="welcomeButtonTextShader"
+          gradientUnits="userSpaceOnUse"
+          x1={x1}
+          y1={-21}
+          x2={x2}
+          y2={51}
+        >
+          <Stop offset={0} stopColor="#080207" />
+          <Stop offset={0.16} stopColor="#5b1238" />
+          <Stop offset={0.31} stopColor="#ff2d8a" />
+          <Stop offset={0.45} stopColor="#7a003e" />
+          <Stop offset={0.59} stopColor="#160711" />
+          <Stop offset={0.76} stopColor="#ff4d9e" />
+          <Stop offset={0.9} stopColor="#2a0a1d" />
+          <Stop offset={1} stopColor="#080207" />
+        </AnimatedLinearGradient>
+      </Defs>
+      <SvgText
+        x={45}
+        y={22}
+        textAnchor="middle"
+        fontSize={19}
+        fontWeight="900"
+        fill="rgba(0,0,0,0.16)"
+        transform="translate(0 1)"
+      >
+        {text}
+      </SvgText>
+      <SvgText
+        x={45}
+        y={22}
+        textAnchor="middle"
+        fontSize={19}
+        fontWeight="900"
+        fill="url(#welcomeButtonTextShader)"
+      >
+        {text}
+      </SvgText>
+    </Svg>
   );
 }
 
@@ -173,13 +263,5 @@ const styles = StyleSheet.create({
   },
   pressed: {
     transform: [{ translateY: 2 }]
-  },
-  signInText: {
-    color: '#060606',
-    fontSize: 19,
-    fontWeight: '900',
-    textShadowColor: 'rgba(0,0,0,0.16)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 1
   }
 });
