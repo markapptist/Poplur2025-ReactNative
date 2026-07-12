@@ -3,7 +3,6 @@ import { Pressable, SafeAreaView, StyleSheet, Text, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { PoplurConfetti } from '../components/PoplurConfetti';
 
-const scallops = Array.from({ length: 13 });
 const dotRows = Array.from({ length: 22 });
 const dotColumns = Array.from({ length: 14 });
 
@@ -26,9 +25,6 @@ export function WelcomeScreen({ navigation, authError }: any) {
             <Text style={styles.signInText}>Sign In</Text>
           </View>
         </Pressable>
-        <View style={styles.scallopRow}>
-          {scallops.map((_, index) => <View key={index} style={styles.scallop} />)}
-        </View>
       </View>
     </SafeAreaView>
   );
@@ -67,7 +63,7 @@ function PoplurMark() {
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: '#ffffff',
+    backgroundColor: '#ff2d96',
     alignItems: 'center',
     justifyContent: 'center'
   },
@@ -182,21 +178,5 @@ const styles = StyleSheet.create({
     color: '#060606',
     fontSize: 19,
     fontWeight: '900'
-  },
-  scallopRow: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: -14,
-    height: 28,
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    paddingHorizontal: 10
-  },
-  scallop: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: '#ffffff'
   }
 });
