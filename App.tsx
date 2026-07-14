@@ -1,6 +1,6 @@
 import 'react-native-gesture-handler';
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { onAuthStateChanged, User } from 'firebase/auth';
@@ -10,6 +10,7 @@ import { auth } from './src/services/firebase';
 import { WelcomeScreen } from './src/screens/WelcomeScreen';
 import { LoginScreen } from './src/screens/LoginScreen';
 import { SignUpScreen } from './src/screens/SignUpScreen';
+import { SplashScreen } from './src/screens/SplashScreen';
 import { FeedScreen } from './src/screens/FeedScreen';
 import { MapScreen } from './src/screens/MapScreen';
 import { CameraScreen } from './src/screens/CameraScreen';
@@ -46,7 +47,7 @@ export default function App() {
     return () => { clearTimeout(timeout); unsubscribe?.(); };
   }, []);
 
-  if (user === undefined) return <View style={styles.loading}><ActivityIndicator color="white" /><Text style={styles.loadingText}>Loading Poplur...</Text></View>;
+  if (user === undefined) return <SplashScreen />;
 
   return <SafeAreaProvider><NavigationContainer><StatusBar style="light" />{user ? <MainApp /> : <AuthStack authError={authError} />}</NavigationContainer></SafeAreaProvider>;
 }
@@ -72,8 +73,6 @@ function MainApp() {
 }
 
 const styles = StyleSheet.create({
-  loading: { flex: 1, backgroundColor: '#050713', alignItems: 'center', justifyContent: 'center' },
-  loadingText: { color: 'rgba(255,255,255,0.72)', marginTop: 12, fontWeight: '700' },
   main: { flex: 1, backgroundColor: '#050713' },
   cubeLayer: { position: 'absolute', left: 0, right: 0, bottom: 0, height: 230, alignItems: 'center', justifyContent: 'center', pointerEvents: 'box-none' }
 });

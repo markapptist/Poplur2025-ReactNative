@@ -17,7 +17,7 @@
     },
     "ios": {
       "bundleIdentifier": "com.apptist.Poplur2025.reactnative",
-      "supportsTablet": false,
+      "supportsTablet": true,
       "infoPlist": {
         "NSCameraUsageDescription": "Poplur needs camera access so you can record location-based posts.",
         "NSMicrophoneUsageDescription": "Poplur needs microphone access to record videos.",
