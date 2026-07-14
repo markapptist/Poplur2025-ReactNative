@@ -99,7 +99,7 @@ class PoplurNativeConfettiView(context: ThemedReactContext) : View(context) {
 
   private fun rebuildPieces(width: Int, height: Int) {
     pieces.clear()
-    val count = 150
+    val count = 189
     repeat(count) { index ->
       pieces.add(
         ConfettiPiece(
