@@ -19,7 +19,7 @@ const welcomeLogo = require('../assets/welcome-logo.png');
 
 const WORLD_WIDTH = 1000;
 const WORLD_HEIGHT = 1700;
-const WORLD_DOT_SPACING = 34;
+const WORLD_DOT_SPACING = 24;
 const worldLand = [
   [[0.02, 0.13], [0.08, 0.08], [0.17, 0.07], [0.25, 0.12], [0.31, 0.2], [0.27, 0.27], [0.23, 0.3], [0.21, 0.38], [0.15, 0.43], [0.1, 0.37], [0.06, 0.34], [0.03, 0.27]],
   [[0.2, 0.04], [0.27, 0.05], [0.3, 0.11], [0.27, 0.17], [0.22, 0.15], [0.18, 0.09]],
@@ -54,7 +54,7 @@ for (let y = WORLD_DOT_SPACING / 2, row = 0; y < WORLD_HEIGHT; y += WORLD_DOT_SP
     const ny = y / WORLD_HEIGHT;
     if (!worldLand.some(polygon => pointIsInsideLand(nx, ny, polygon))) continue;
     const hash = Math.abs(row * 73 + column * 151 + row * column * 19) % 41;
-    worldDots.push({ x, y, radius: 6.5, highlight: hash < 4, phase: hash % 3 });
+    worldDots.push({ x, y, radius: 4.6, highlight: hash < 4, phase: hash % 3 });
   }
 }
 
