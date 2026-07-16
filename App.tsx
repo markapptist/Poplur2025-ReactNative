@@ -7,6 +7,7 @@ import { onAuthStateChanged, User } from 'firebase/auth';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { auth } from './src/services/firebase';
+import { SplashScreen } from './src/screens/SplashScreen';
 import { WelcomeScreen } from './src/screens/WelcomeScreen';
 import { LoginScreen } from './src/screens/LoginScreen';
 import { SignUpScreen } from './src/screens/SignUpScreen';
@@ -24,6 +25,12 @@ const Stack = createNativeStackNavigator();
 export default function App() {
   const [user, setUser] = useState<User | null | undefined>(undefined);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [isSplashMinimumElapsed, setIsSplashMinimumElapsed] = useState(false);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setIsSplashMinimumElapsed(true), 3500);
+    return () => clearTimeout(timer);
+  }, []);
 
   useEffect(() => {
     // Fall back to logged-out after 4 s so a slow/offline Firebase never

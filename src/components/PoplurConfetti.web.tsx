@@ -29,7 +29,7 @@ export function PoplurConfetti() {
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
     const geometry = new THREE.PlaneGeometry(0.045, 0.016);
-    for (let index = 0; index < 170; index += 1) {
+    for (let index = 0; index < 189; index += 1) {
       const material = new THREE.MeshBasicMaterial({
         color: colors[index % colors.length],
         side: THREE.DoubleSide,

@@ -1,19 +1,69 @@
-import React from 'react';
-import { Image, Pressable, SafeAreaView, StyleSheet, Text, View } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import {
+  AccessibilityInfo,
+  Animated,
+  Easing,
+  Image,
+  Pressable,
+  SafeAreaView,
+  StyleSheet,
+  Text,
+  View
+} from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import Svg, { Circle } from 'react-native-svg';
 import { PoplurConfetti } from '../components/PoplurConfetti';
 
 const scallops = Array.from({ length: 15 });
-const dotRows = Array.from({ length: 9 });
-const dotColumns = Array.from({ length: 13 });
 const welcomeLogo = require('../assets/welcome-logo.png');
+
+const WORLD_WIDTH = 1000;
+const WORLD_HEIGHT = 1700;
+const WORLD_DOT_SPACING = 24;
+const worldLand = [
+  [[0.02, 0.13], [0.08, 0.08], [0.17, 0.07], [0.25, 0.12], [0.31, 0.2], [0.27, 0.27], [0.23, 0.3], [0.21, 0.38], [0.15, 0.43], [0.1, 0.37], [0.06, 0.34], [0.03, 0.27]],
+  [[0.2, 0.04], [0.27, 0.05], [0.3, 0.11], [0.27, 0.17], [0.22, 0.15], [0.18, 0.09]],
+  [[0.16, 0.39], [0.23, 0.4], [0.29, 0.47], [0.31, 0.57], [0.28, 0.68], [0.25, 0.79], [0.22, 0.91], [0.18, 0.82], [0.16, 0.7], [0.13, 0.56], [0.13, 0.46]],
+  [[0.39, 0.18], [0.45, 0.14], [0.53, 0.16], [0.56, 0.23], [0.52, 0.29], [0.46, 0.28], [0.4, 0.24]],
+  [[0.4, 0.28], [0.51, 0.27], [0.57, 0.36], [0.56, 0.49], [0.52, 0.62], [0.47, 0.72], [0.42, 0.62], [0.38, 0.47], [0.38, 0.35]],
+  [[0.51, 0.14], [0.63, 0.08], [0.76, 0.08], [0.89, 0.14], [0.98, 0.23], [0.95, 0.33], [0.87, 0.36], [0.82, 0.44], [0.73, 0.42], [0.68, 0.37], [0.6, 0.37], [0.54, 0.3], [0.51, 0.23]],
+  [[0.61, 0.34], [0.68, 0.37], [0.73, 0.47], [0.8, 0.52], [0.78, 0.59], [0.71, 0.56], [0.66, 0.49]],
+  [[0.7, 0.65], [0.8, 0.6], [0.9, 0.64], [0.94, 0.74], [0.87, 0.83], [0.76, 0.81], [0.69, 0.73]],
+  [[0.93, 0.4], [0.96, 0.43], [0.95, 0.5], [0.92, 0.48]],
+  [[0.58, 0.69], [0.6, 0.73], [0.59, 0.8], [0.57, 0.77]]
+] as const;
+
+type WorldDot = { x: number; y: number; radius: number; highlight: boolean; phase: number };
+
+function pointIsInsideLand(x: number, y: number, polygon: readonly (readonly number[])[]) {
+  let inside = false;
+  for (let index = 0, previous = polygon.length - 1; index < polygon.length; previous = index++) {
+    const [x1, y1] = polygon[index];
+    const [x2, y2] = polygon[previous];
+    if ((y1 > y) !== (y2 > y) && x < ((x2 - x1) * (y - y1)) / ((y2 - y1) || 0.000001) + x1) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
+const worldDots: WorldDot[] = [];
+for (let y = WORLD_DOT_SPACING / 2, row = 0; y < WORLD_HEIGHT; y += WORLD_DOT_SPACING, row += 1) {
+  for (let x = WORLD_DOT_SPACING / 2, column = 0; x < WORLD_WIDTH; x += WORLD_DOT_SPACING, column += 1) {
+    const nx = x / WORLD_WIDTH;
+    const ny = y / WORLD_HEIGHT;
+    if (!worldLand.some(polygon => pointIsInsideLand(nx, ny, polygon))) continue;
+    const hash = Math.abs(row * 73 + column * 151 + row * column * 19) % 41;
+    worldDots.push({ x, y, radius: 4.6, highlight: hash < 4, phase: hash % 3 });
+  }
+}
 
 export function WelcomeScreen({ navigation, authError }: any) {
   return (
     <SafeAreaView style={styles.screen}>
       <StatusBar style="light" />
       <View style={styles.ticket}>
-        <HalftoneDots />
+        <AnimatedWorldMap />
         <View pointerEvents="none" style={[styles.radiusRing, styles.radiusRingLeft]} />
         <View pointerEvents="none" style={[styles.radiusRing, styles.radiusRingRight]} />
         <Image source={welcomeLogo} resizeMode="contain" style={styles.logo} />
@@ -58,17 +108,81 @@ function WelcomeCube() {
   );
 }
 
-function HalftoneDots() {
+function AnimatedWorldMap() {
+  const [reduceMotion, setReduceMotion] = useState(false);
+  const pulses = useRef([
+    new Animated.Value(0.42),
+    new Animated.Value(0.42),
+    new Animated.Value(0.42)
+  ]).current;
+
+  useEffect(() => {
+    let mounted = true;
+    AccessibilityInfo.isReduceMotionEnabled().then(enabled => {
+      if (mounted) setReduceMotion(enabled);
+    });
+    const subscription = AccessibilityInfo.addEventListener('reduceMotionChanged', setReduceMotion);
+    return () => {
+      mounted = false;
+      subscription.remove();
+    };
+  }, []);
+
+  useEffect(() => {
+    const animations = pulses.map((pulse, index) => {
+      pulse.stopAnimation();
+      if (reduceMotion) {
+        pulse.setValue(0.72);
+        return undefined;
+      }
+      pulse.setValue(0.3);
+      const animation = Animated.loop(
+        Animated.sequence([
+          Animated.delay(index * 310),
+          Animated.timing(pulse, {
+            toValue: 1,
+            duration: 920,
+            easing: Easing.inOut(Easing.sin),
+            useNativeDriver: false
+          }),
+          Animated.timing(pulse, {
+            toValue: 0.3,
+            duration: 920,
+            easing: Easing.inOut(Easing.sin),
+            useNativeDriver: false
+          }),
+          Animated.delay((2 - index) * 310)
+        ])
+      );
+      animation.start();
+      return animation;
+    });
+    return () => animations.forEach(animation => animation?.stop());
+  }, [pulses, reduceMotion]);
+
   return (
-    <View pointerEvents="none" style={styles.dotField}>
-      {dotRows.map((_, row) => (
-        <View key={row} style={styles.dotRow}>
-          {dotColumns.map((__, column) => {
-            const distance = Math.abs(column - (dotColumns.length - 1) / 2);
-            const alpha = Math.max(0.04, 0.3 - distance * 0.035 - row * 0.018);
-            return <View key={column} style={[styles.dot, { opacity: alpha }]} />;
-          })}
-        </View>
+    <View
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
+      pointerEvents="none"
+      style={styles.worldMap}
+    >
+      <Svg width="100%" height="100%" viewBox={`0 0 ${WORLD_WIDTH} ${WORLD_HEIGHT}`} preserveAspectRatio="none">
+        {worldDots.map((dot, index) => (
+          <Circle key={index} cx={dot.x} cy={dot.y} r={dot.radius} fill="#ffffff" opacity={dot.highlight ? 0.2 : 0.22} />
+        ))}
+      </Svg>
+      {pulses.map((pulse, phase) => (
+        <Animated.View key={phase} style={[styles.worldMapPulse, { opacity: pulse }]}>
+          <Svg width="100%" height="100%" viewBox={`0 0 ${WORLD_WIDTH} ${WORLD_HEIGHT}`} preserveAspectRatio="none">
+            {worldDots.map((dot, index) => dot.highlight && dot.phase === phase ? (
+              <React.Fragment key={index}>
+                <Circle cx={dot.x} cy={dot.y} r={dot.radius * 2.25} fill="#ffffff" opacity={0.12} />
+                <Circle cx={dot.x} cy={dot.y} r={dot.radius * 1.08} fill="#ffffff" />
+              </React.Fragment>
+            ) : null)}
+          </Svg>
+        </Animated.View>
       ))}
     </View>
   );
@@ -85,25 +199,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     overflow: 'hidden'
   },
-  dotField: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    height: '34%',
-    paddingTop: 12,
-    paddingHorizontal: 12,
-    justifyContent: 'space-between'
+  worldMap: {
+    ...StyleSheet.absoluteFillObject,
+    opacity: 0.88
   },
-  dotRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between'
-  },
-  dot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#ffffff'
+  worldMapPulse: {
+    ...StyleSheet.absoluteFillObject
   },
   radiusRing: {
     position: 'absolute',
