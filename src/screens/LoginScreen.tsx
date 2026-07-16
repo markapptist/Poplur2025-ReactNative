@@ -6,8 +6,6 @@ import { signInWithEmailAndPassword } from 'firebase/auth';
 import { auth } from '../services/firebase';
 
 const scallops = Array.from({ length: 13 });
-const dotRows = Array.from({ length: 23 });
-const dotColumns = Array.from({ length: 15 });
 
 export function LoginScreen({ navigation }: any) {
   const [email, setEmail] = useState('');
@@ -42,7 +40,6 @@ export function LoginScreen({ navigation }: any) {
         </Pressable>
 
         <View style={styles.ticket}>
-          <HalftoneDots />
           <PoplurMark />
 
           <View style={styles.form}>
@@ -94,22 +91,6 @@ export function LoginScreen({ navigation }: any) {
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
-  );
-}
-
-function HalftoneDots() {
-  return (
-    <View pointerEvents="none" style={styles.dotField}>
-      {dotRows.map((_, row) => (
-        <View key={row} style={styles.dotRow}>
-          {dotColumns.map((__, column) => {
-            const centerDistance = Math.abs(column - (dotColumns.length - 1) / 2);
-            const alpha = Math.max(0.11, 0.42 - centerDistance * 0.035 - row * 0.003);
-            return <View key={column} style={[styles.dot, { opacity: alpha }]} />;
-          })}
-        </View>
-      ))}
-    </View>
   );
 }
 
@@ -172,22 +153,6 @@ const styles = StyleSheet.create({
     shadowRadius: 28,
     shadowOffset: { width: 0, height: 18 },
     elevation: 12
-  },
-  dotField: {
-    ...StyleSheet.absoluteFillObject,
-    paddingTop: 54,
-    paddingHorizontal: 34,
-    justifyContent: 'space-between'
-  },
-  dotRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between'
-  },
-  dot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#ffffff'
   },
   logoShadow: {
     marginTop: 50,

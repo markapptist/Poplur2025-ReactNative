@@ -167,11 +167,6 @@ function AnimatedWorldMap() {
       pointerEvents="none"
       style={styles.worldMap}
     >
-      <Svg width="100%" height="100%" viewBox={`0 0 ${WORLD_WIDTH} ${WORLD_HEIGHT}`} preserveAspectRatio="none">
-        {worldDots.map((dot, index) => (
-          <Circle key={index} cx={dot.x} cy={dot.y} r={dot.radius} fill="#ffffff" opacity={dot.highlight ? 0.2 : 0.22} />
-        ))}
-      </Svg>
       {pulses.map((pulse, phase) => (
         <Animated.View key={phase} style={[styles.worldMapPulse, { opacity: pulse }]}>
           <Svg width="100%" height="100%" viewBox={`0 0 ${WORLD_WIDTH} ${WORLD_HEIGHT}`} preserveAspectRatio="none">
