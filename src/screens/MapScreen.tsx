@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Platform, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import MapView, { Camera, Circle, LatLng, Marker, PROVIDER_DEFAULT, PROVIDER_GOOGLE } from 'react-native-maps';
 import * as Location from 'expo-location';
 import * as ImagePicker from 'expo-image-picker';
@@ -30,6 +30,7 @@ function locationCamera(coordinate: LatLng): Partial<Camera> {
 
 export function MapScreen() {
   const mapRef = useRef<MapView | null>(null);
+  const { width, height } = useWindowDimensions();
   const autoZoomedRef = useRef(false);
   const [posts, setPosts] = useState<Post[]>([]);
   const [selected, setSelected] = useState<LatLng | null>(null);
@@ -43,6 +44,38 @@ export function MapScreen() {
   const radiusKm = selected ? Math.max(0, Math.round(distanceKm(currentLocation ?? toronto, selected))) : 0;
   const isAndroid = Platform.OS === 'android';
   const mapType = Platform.OS === 'ios' ? 'hybridFlyover' : 'hybrid';
+  const responsive = useMemo(() => {
+    const shortSide = Math.min(width, height);
+    const isTablet = shortSide >= 600;
+    return {
+      header: {
+        left: isTablet ? 56 : 38,
+        right: isTablet ? 56 : 28,
+        top: Math.max(88, Math.min(height * 0.13, isTablet ? 138 : 150))
+      },
+      title: {
+        fontSize: isTablet ? 42 : 36,
+        lineHeight: isTablet ? 48 : 42
+      },
+      subtitle: {
+        maxWidth: isTablet ? Math.min(width * 0.62, 620) : undefined,
+        fontSize: isTablet ? 28 : 30,
+        lineHeight: isTablet ? 36 : 40
+      },
+      trending: {
+        left: isTablet ? Math.max(48, width * 0.07) : 86,
+        bottom: isTablet ? Math.max(116, height * 0.12) : 214
+      },
+      actions: {
+        right: isTablet ? 48 : 28,
+        bottom: isTablet ? Math.max(238, height * 0.27) : 320
+      },
+      radius: {
+        right: isTablet ? 56 : 36,
+        bottom: isTablet ? Math.max(72, height * 0.08) : 104
+      }
+    };
+  }, [height, width]);
 
   const load = useCallback(async () => {
     setError(null);
@@ -137,13 +170,13 @@ export function MapScreen() {
 
     {!mapReady && <View style={styles.loading}><Text style={styles.loadingText}>Loading hybrid map...</Text></View>}
 
-    <View pointerEvents="none" style={styles.header}>
-      <Text style={styles.title}>Your Location</Text>
-      <Text style={styles.subtitle}>Explore what's happening around you right now!</Text>
+    <View pointerEvents="none" style={[styles.header, responsive.header]}>
+      <Text style={[styles.title, responsive.title]}>Your Location</Text>
+      <Text style={[styles.subtitle, responsive.subtitle]}>Explore what's happening around you right now!</Text>
       {error && <Text style={styles.error}>{error}</Text>}
     </View>
 
-    <View pointerEvents="none" style={styles.trending}>
+    <View pointerEvents="none" style={[styles.trending, responsive.trending]}>
       <Text style={styles.label}>TRENDING</Text>
       <Ionicons name="arrow-up" color="#6ee36f" size={72} />
       <View style={styles.whiteRule} />
@@ -151,7 +184,7 @@ export function MapScreen() {
       <Text style={styles.caption}>posts</Text>
     </View>
 
-    <View style={styles.actions}>
+    <View style={[styles.actions, responsive.actions]}>
       <Pressable style={styles.weather} onPress={resetToGlobe}>
         <Ionicons name="rainy" color="white" size={48} />
         <Text style={styles.weatherText}>Rain</Text>
@@ -164,7 +197,7 @@ export function MapScreen() {
       </Pressable>
     </View>
 
-    <View pointerEvents="none" style={styles.radius}>
+    <View pointerEvents="none" style={[styles.radius, responsive.radius]}>
       <View style={styles.radiusHeader}>
         <Text style={styles.label}>RADIUS</Text>
         <Ionicons name="shield" color="#c98438" size={28} />

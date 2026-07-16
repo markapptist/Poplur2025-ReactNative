@@ -1,80 +1,61 @@
 import React from 'react';
-import { Pressable, SafeAreaView, StyleSheet, Text, View } from 'react-native';
+import { Image, Pressable, SafeAreaView, StyleSheet, Text, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import Svg, { Defs, LinearGradient, Stop, Text as SvgText } from 'react-native-svg';
 import { PoplurConfetti } from '../components/PoplurConfetti';
 
-const dotRows = Array.from({ length: 22 });
-const dotColumns = Array.from({ length: 14 });
+const scallops = Array.from({ length: 15 });
+const dotRows = Array.from({ length: 9 });
+const dotColumns = Array.from({ length: 13 });
+const welcomeLogo = require('../assets/welcome-logo.png');
 
 export function WelcomeScreen({ navigation, authError }: any) {
   return (
     <SafeAreaView style={styles.screen}>
-      <StatusBar style="dark" />
-      <PoplurConfetti />
+      <StatusBar style="light" />
       <View style={styles.ticket}>
         <HalftoneDots />
-        <PoplurMark />
+        <View pointerEvents="none" style={[styles.radiusRing, styles.radiusRingLeft]} />
+        <View pointerEvents="none" style={[styles.radiusRing, styles.radiusRingRight]} />
+        <Image source={welcomeLogo} resizeMode="contain" style={styles.logo} />
+        <WelcomeCube />
         {authError ? <Text style={styles.errorText}>{authError}</Text> : null}
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Sign in"
-          onPress={() => navigation.navigate('Login')}
-          style={({ pressed }) => [styles.signInShadow, pressed && styles.pressed]}
-        >
-          <View style={styles.signInButton}>
-            <WelcomeButtonShaderText text="Sign In" />
-          </View>
-        </Pressable>
+        <View style={styles.actions}>
+          <WelcomeButton label="Sign In" onPress={() => navigation.navigate('Login')} />
+          <WelcomeButton label="Sign Up" compact onPress={() => navigation.navigate('SignUp')} />
+        </View>
+        <View style={styles.scallopStrip}>
+          {scallops.map((_, index) => <View key={index} style={styles.scallop} />)}
+        </View>
       </View>
+      <PoplurConfetti />
     </SafeAreaView>
   );
 }
 
-function WelcomeButtonShaderText({ text }: { text: string }) {
+function WelcomeButton({ label, onPress, compact = false }: { label: string; onPress: () => void; compact?: boolean }) {
   return (
-    <Svg width={90} height={30} viewBox="0 0 90 30" accessible={false} pointerEvents="none">
-      <Defs>
-        <LinearGradient
-          id="welcomeButtonTextShader"
-          gradientUnits="userSpaceOnUse"
-          x1={-39.6}
-          y1={-21}
-          x2={230.4}
-          y2={51}
-        >
-          <Stop offset={0} stopColor="#080207" />
-          <Stop offset={0.16} stopColor="#5b1238" />
-          <Stop offset={0.31} stopColor="#ff2d8a" />
-          <Stop offset={0.45} stopColor="#7a003e" />
-          <Stop offset={0.59} stopColor="#160711" />
-          <Stop offset={0.76} stopColor="#ff4d9e" />
-          <Stop offset={0.9} stopColor="#2a0a1d" />
-          <Stop offset={1} stopColor="#080207" />
-        </LinearGradient>
-      </Defs>
-      <SvgText
-        x={45}
-        y={22}
-        textAnchor="middle"
-        fontSize={19}
-        fontWeight="900"
-        fill="rgba(0,0,0,0.16)"
-        transform="translate(0 1)"
-      >
-        {text}
-      </SvgText>
-      <SvgText
-        x={45}
-        y={22}
-        textAnchor="middle"
-        fontSize={19}
-        fontWeight="900"
-        fill="url(#welcomeButtonTextShader)"
-      >
-        {text}
-      </SvgText>
-    </Svg>
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      onPress={onPress}
+      style={({ pressed }) => [styles.buttonShadow, compact && styles.buttonShadowCompact, pressed && styles.pressed]}
+    >
+      <View style={[styles.button, compact && styles.buttonCompact]}>
+        <Text style={[styles.buttonText, compact && styles.buttonTextCompact]}>{label}</Text>
+      </View>
+    </Pressable>
+  );
+}
+
+function WelcomeCube() {
+  return (
+    <View pointerEvents="none" style={styles.cubeShadow}>
+      <View style={styles.cubeFace}>
+        <Image source={welcomeLogo} resizeMode="contain" style={styles.cubeLogo} />
+        <Text style={styles.cubeWordmark}>poplur</Text>
+      </View>
+    </View>
   );
 }
 
@@ -84,8 +65,8 @@ function HalftoneDots() {
       {dotRows.map((_, row) => (
         <View key={row} style={styles.dotRow}>
           {dotColumns.map((__, column) => {
-            const edge = Math.min(column, dotColumns.length - 1 - column);
-            const alpha = Math.max(0.1, 0.38 - edge * 0.045 - row * 0.004);
+            const distance = Math.abs(column - (dotColumns.length - 1) / 2);
+            const alpha = Math.max(0.04, 0.3 - distance * 0.035 - row * 0.018);
             return <View key={column} style={[styles.dot, { opacity: alpha }]} />;
           })}
         </View>
@@ -94,41 +75,25 @@ function HalftoneDots() {
   );
 }
 
-function PoplurMark() {
-  return (
-    <View style={styles.logoShadow}>
-      <View style={styles.logoTile}>
-        <View style={[styles.petal, styles.petalTopLeft]} />
-        <View style={[styles.petal, styles.petalTopRight]} />
-        <View style={[styles.petal, styles.petalBottomLeft]} />
-        <View style={[styles.petal, styles.petalBottomRight]} />
-        <Text style={styles.logoLetter}>P</Text>
-      </View>
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: '#ff2d96',
-    alignItems: 'center',
-    justifyContent: 'center'
+    backgroundColor: '#ed2e79'
   },
   ticket: {
-    width: '86%',
-    maxWidth: 430,
-    minHeight: '78%',
-    borderTopLeftRadius: 22,
-    borderTopRightRadius: 22,
-    backgroundColor: '#ef477d',
+    flex: 1,
+    backgroundColor: '#ef3d82',
     alignItems: 'center',
     overflow: 'hidden'
   },
   dotField: {
-    ...StyleSheet.absoluteFillObject,
-    paddingTop: 18,
-    paddingHorizontal: 18,
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: '34%',
+    paddingTop: 12,
+    paddingHorizontal: 12,
     justifyContent: 'space-between'
   },
   dotRow: {
@@ -141,85 +106,137 @@ const styles = StyleSheet.create({
     borderRadius: 4,
     backgroundColor: '#ffffff'
   },
-  logoShadow: {
-    marginTop: 82,
-    width: 224,
-    height: 224,
-    borderRadius: 48,
-    backgroundColor: 'rgba(91, 8, 72, 0.24)',
-    transform: [{ translateY: 10 }],
-    shadowColor: '#5a063d',
-    shadowOpacity: 0.32,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 16 },
+  radiusRing: {
+    position: 'absolute',
+    width: 190,
+    height: 190,
+    borderRadius: 95,
+    borderWidth: 2,
+    borderColor: 'rgba(255,255,255,0.12)'
+  },
+  radiusRingLeft: {
+    left: -150,
+    top: '24%'
+  },
+  radiusRingRight: {
+    right: -144,
+    bottom: '16%'
+  },
+  logo: {
+    position: 'absolute',
+    top: '6%',
+    width: 142,
+    height: 142
+  },
+  cubeShadow: {
+    position: 'absolute',
+    top: '43%',
+    width: 96,
+    height: 96,
+    borderRadius: 12,
+    backgroundColor: 'rgba(82,0,39,0.38)',
+    transform: [{ rotate: '-4deg' }, { translateY: 8 }],
+    shadowColor: '#560024',
+    shadowOpacity: 0.4,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 10 },
     elevation: 12
   },
-  logoTile: {
+  cubeFace: {
     position: 'absolute',
     left: 0,
-    top: -10,
-    width: 224,
-    height: 224,
-    borderRadius: 48,
-    borderWidth: 3,
-    borderColor: '#7a0d66',
-    backgroundColor: '#21091f',
+    top: -8,
+    width: 96,
+    height: 96,
+    borderRadius: 10,
+    borderWidth: 2,
+    borderColor: 'rgba(255,255,255,0.38)',
+    backgroundColor: '#f22b84',
     alignItems: 'center',
-    justifyContent: 'center',
-    overflow: 'hidden'
+    justifyContent: 'center'
   },
-  petal: {
-    position: 'absolute',
-    width: 112,
-    height: 112,
-    borderRadius: 56,
-    backgroundColor: '#f80b86',
-    borderWidth: 3,
-    borderColor: 'rgba(255,255,255,0.22)'
+  cubeLogo: {
+    width: 58,
+    height: 58
   },
-  petalTopLeft: { left: 42, top: 38 },
-  petalTopRight: { right: 34, top: 42 },
-  petalBottomLeft: { left: 44, bottom: 35, backgroundColor: '#dd0877' },
-  petalBottomRight: { right: 38, bottom: 34, backgroundColor: '#ea077e' },
-  logoLetter: {
-    color: '#fff8fb',
-    fontSize: 138,
+  cubeWordmark: {
+    marginTop: -5,
+    color: '#ffffff',
+    fontSize: 12,
     fontWeight: '900',
-    lineHeight: 152,
-    textShadowColor: '#c20b74',
-    textShadowOffset: { width: 0, height: 3 },
-    textShadowRadius: 2
+    letterSpacing: -0.5
   },
   errorText: {
-    marginTop: 46,
-    maxWidth: 280,
-    color: '#fff',
+    position: 'absolute',
+    top: '33%',
+    maxWidth: 300,
+    color: '#ffffff',
     fontSize: 13,
-    fontWeight: '700',
+    fontWeight: '800',
     lineHeight: 18,
     textAlign: 'center'
   },
-  signInShadow: {
+  actions: {
     position: 'absolute',
-    top: '58%',
-    width: 166,
+    bottom: '7.5%',
+    alignItems: 'center',
+    gap: 28
+  },
+  buttonShadow: {
+    width: 220,
     height: 66,
     borderRadius: 33,
     backgroundColor: '#050505',
-    justifyContent: 'flex-end',
-    alignItems: 'center'
+    justifyContent: 'flex-start',
+    alignItems: 'center',
+    paddingTop: 0
   },
-  signInButton: {
-    width: 166,
+  buttonShadowCompact: {
+    width: 194,
+    height: 58,
+    borderRadius: 29
+  },
+  button: {
+    width: 220,
     height: 58,
     borderRadius: 29,
-    backgroundColor: '#ffffff',
+    backgroundColor: '#fffafd',
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(0,0,0,0.05)'
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,255,255,0.75)'
+  },
+  buttonCompact: {
+    width: 194,
+    height: 50,
+    borderRadius: 25
+  },
+  buttonText: {
+    color: '#080609',
+    fontSize: 25,
+    fontWeight: '900'
+  },
+  buttonTextCompact: {
+    fontSize: 20
   },
   pressed: {
-    transform: [{ translateY: 2 }]
+    transform: [{ translateY: 2 }],
+    opacity: 0.92
+  },
+  scallopStrip: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: -13,
+    height: 27,
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    backgroundColor: '#ffffff'
+  },
+  scallop: {
+    width: 25,
+    height: 25,
+    borderRadius: 13,
+    backgroundColor: '#ef3d82'
   }
 });

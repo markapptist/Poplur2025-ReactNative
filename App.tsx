@@ -11,6 +11,7 @@ import { SplashScreen } from './src/screens/SplashScreen';
 import { WelcomeScreen } from './src/screens/WelcomeScreen';
 import { LoginScreen } from './src/screens/LoginScreen';
 import { SignUpScreen } from './src/screens/SignUpScreen';
+import { SplashScreen } from './src/screens/SplashScreen';
 import { FeedScreen } from './src/screens/FeedScreen';
 import { MapScreen } from './src/screens/MapScreen';
 import { CameraScreen } from './src/screens/CameraScreen';
@@ -53,7 +54,7 @@ export default function App() {
     return () => { clearTimeout(timeout); unsubscribe?.(); };
   }, []);
 
-  if (user === undefined || !isSplashMinimumElapsed) return <SplashScreen />;
+  if (user === undefined) return <SplashScreen />;
 
   return <SafeAreaProvider><NavigationContainer><StatusBar style="light" />{user ? <MainApp /> : <AuthStack authError={authError} />}</NavigationContainer></SafeAreaProvider>;
 }

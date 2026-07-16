@@ -8,7 +8,7 @@
     "icon": "./src/assets/icon-1024x1024.png",
     "userInterfaceStyle": "dark",
     "web": {
-      "favicon": "./src/assets/favicon.ico",
+      "favicon": "./src/assets/icon-48x48.png",
       "name": "Poplur",
       "shortName": "Poplur",
       "description": "Poplur - location-based social app",
@@ -17,7 +17,7 @@
     },
     "ios": {
       "bundleIdentifier": "com.apptist.Poplur2025.reactnative",
-      "supportsTablet": false,
+      "supportsTablet": true,
       "infoPlist": {
         "NSCameraUsageDescription": "Poplur needs camera access so you can record location-based posts.",
         "NSMicrophoneUsageDescription": "Poplur needs microphone access to record videos.",
