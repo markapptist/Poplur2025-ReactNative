@@ -12,6 +12,7 @@ import { WelcomeScreen } from './src/screens/WelcomeScreen';
 import { LoginScreen } from './src/screens/LoginScreen';
 import { SignUpScreen } from './src/screens/SignUpScreen';
 import { SplashScreen } from './src/screens/SplashScreen';
+import { PreloginWebScreen } from './src/screens/PreloginWebScreen';
 import { FeedScreen } from './src/screens/FeedScreen';
 import { MapScreen } from './src/screens/MapScreen';
 import { CameraScreen } from './src/screens/CameraScreen';
@@ -61,9 +62,11 @@ export default function App() {
 
 function AuthStack({ authError }: { authError: string | null }) {
   return <Stack.Navigator screenOptions={{ headerShown: false, contentStyle: { backgroundColor: '#050713' } }}>
-    <Stack.Screen name="Welcome">{props => <WelcomeScreen {...props} authError={authError} />}</Stack.Screen>
-    <Stack.Screen name="Login" component={LoginScreen} />
-    <Stack.Screen name="SignUp" component={SignUpScreen} />
+    {/* iOS physical is the source baseline: render the same approved GCL web
+        bundle on RN rather than maintaining a divergent native remake. */}
+    <Stack.Screen name="Prelogin">
+      {() => <PreloginWebScreen />}
+    </Stack.Screen>
   </Stack.Navigator>;
 }
 
