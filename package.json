@@ -8,10 +8,12 @@
     "android": "expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "postinstall": "patch-package"
   },
   "dependencies": {
-    "@dr.pogodin/react-native-static-server": "^0.27.0",
+    "@dr.pogodin/react-native-fs": "^2.30.0",
+    "@dr.pogodin/react-native-static-server": "^0.25.4",
     "@expo/metro-runtime": "~4.0.1",
     "@expo/vector-icons": "^14.0.4",
     "@react-native-async-storage/async-storage": "1.23.1",
@@ -48,6 +50,7 @@
   "devDependencies": {
     "@babel/core": "^7.25.2",
     "@types/react": "~18.3.12",
+    "patch-package": "^8.0.1",
     "typescript": "^5.3.3"
   }
 }
