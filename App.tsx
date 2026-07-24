@@ -12,6 +12,11 @@ import { WelcomeScreen } from './src/screens/WelcomeScreen';
 import { LoginScreen } from './src/screens/LoginScreen';
 import { SignUpScreen } from './src/screens/SignUpScreen';
 import { PreloginWebScreen } from './src/screens/PreloginWebScreen';
+import { PostLoginHomeWebScreen } from './src/screens/PostLoginHomeWebScreen';
+
+// Post-login web-embed (parity with iOS/Android): render the approved web home
+// rather than the divergent native RN tabs. Reversible.
+const USE_WEB_HOME = true;
 import { FeedScreen } from './src/screens/FeedScreen';
 import { MapScreen } from './src/screens/MapScreen';
 import { CameraScreen } from './src/screens/CameraScreen';
@@ -56,7 +61,10 @@ export default function App() {
 
   if (user === undefined) return <SplashScreen />;
 
-  return <SafeAreaProvider><NavigationContainer><StatusBar style="light" />{user ? <MainApp /> : <AuthStack authError={authError} />}</NavigationContainer></SafeAreaProvider>;
+  // Post-login parity with iOS/Android Phase 3: signed-in users get the approved
+  // web home (clay-map ViewHarness ?view=home) instead of the native RN remake.
+  // Flip USE_WEB_HOME to false to restore the native MainApp tabs.
+  return <SafeAreaProvider><NavigationContainer><StatusBar style="light" />{user ? (USE_WEB_HOME ? <PostLoginHomeWebScreen /> : <MainApp />) : <AuthStack authError={authError} />}</NavigationContainer></SafeAreaProvider>;
 }
 
 function AuthStack({ authError }: { authError: string | null }) {
@@ -83,5 +91,16 @@ function MainApp() {
 
 const styles = StyleSheet.create({
   main: { flex: 1, backgroundColor: '#050713' },
-  cubeLayer: { position: 'absolute', left: 0, right: 0, bottom: 0, height: 230, alignItems: 'center', justifyContent: 'center', pointerEvents: 'box-none' }
+  cubeLayer: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: 230,
+    alignItems: 'center',
+    justifyContent: 'center',
+    pointerEvents: 'box-none',
+    zIndex: 1000,
+    elevation: 1000
+  }
 });
