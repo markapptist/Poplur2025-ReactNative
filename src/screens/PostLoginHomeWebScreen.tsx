@@ -25,7 +25,7 @@ import { PreloginWebScreen } from './PreloginWebScreen';
 // homeReady).
 
 // Bump when the staged claymap.zip changes so devices re-extract.
-const BUNDLE_VERSION = '4';
+const BUNDLE_VERSION = '5';
 
 const CLAYMAP_ZIP = require('../assets/claymap/claymap.zip');
 
