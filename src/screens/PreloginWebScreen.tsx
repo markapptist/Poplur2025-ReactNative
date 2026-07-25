@@ -97,6 +97,12 @@ const THREE_ADDONS_CDN = 'https://unpkg.com/three@0.170.0/examples/jsm/';
 const PERF_TWEAKS = `<style id="poplur-perf">
 #glassOverlay{ -webkit-backdrop-filter:none!important; backdrop-filter:none!important; background:rgba(6,4,12,.5)!important; }
 #confetti > *:nth-child(even){ display:none!important; }
+/* Clay consistency: the auth switch links get the full clay text-shadow (match
+   the "Tap the cube to go back" hint), and the mute glyph gets a layered clay
+   emboss so it reads as 3D. */
+.authLink{ color:#f8efdc!important; text-shadow:0 -2px 0 rgba(255,255,255,0.4),0 2px 0 #d8b98e,0 4px 0 rgba(158,14,78,0.5),0 6px 8px rgba(104,2,48,0.5),0 12px 18px rgba(80,0,36,0.35)!important; }
+.muteBtn{ filter:drop-shadow(0 -1px 0 rgba(255,255,255,0.55)) drop-shadow(0 1.5px 0 #d8b98e) drop-shadow(0 3px 0 rgba(158,14,78,0.5)) drop-shadow(0 5px 7px rgba(104,2,48,0.55))!important; }
+.muteBtn svg,.muteBtn svg path{ fill:#f8efdc!important; }
 </style>
 <script>(function(){
   // The worldMapMotion canvas resets its backing resolution every frame, so a
@@ -247,7 +253,8 @@ async function preparePage(page: Page): Promise<string> {
 
 export function PreloginWebScreen({ splashOnly = false }: { splashOnly?: boolean }) {
   const webViewRef = useRef<WebView>(null);
-  const [page, setPage] = useState<Page>('splash');
+  // Launch splash dropped (parity with iOS/Android): straight to Welcome on black.
+  const [page, setPage] = useState<Page>(splashOnly ? 'splash' : 'welcome');
   const [html, setHtml] = useState<string | null>(null);
 
   useEffect(() => {
