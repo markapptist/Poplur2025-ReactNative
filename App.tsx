@@ -25,6 +25,24 @@ import { SettingsScreen } from './src/screens/SettingsScreen';
 import { PoplurCube } from './src/components/PoplurCube';
 import type { AppTab } from './src/types/models';
 
+// Web-only: the app's screens are designed for a phone's portrait aspect ratio,
+// so a wide desktop window collapses their vertical layout (text overlaps
+// buttons). Present the app in a centered, phone-width frame that scales with
+// the window — responsive down to mobile widths, framed on large screens.
+// Native (iOS/Android) never runs this.
+if (typeof document !== 'undefined') {
+  const STYLE_ID = 'poplur-web-frame';
+  if (!document.getElementById(STYLE_ID)) {
+    const el = document.createElement('style');
+    el.id = STYLE_ID;
+    // Fill the whole browser window edge-to-edge and re-fit on resize.
+    el.textContent =
+      'html,body{height:100%;margin:0;overflow:hidden;background:#050713}' +
+      '#root{width:100vw;height:100vh;overflow:hidden}';
+    document.head.appendChild(el);
+  }
+}
+
 const Stack = createNativeStackNavigator();
 
 export default function App() {
@@ -64,7 +82,7 @@ export default function App() {
   // Post-login parity with iOS/Android Phase 3: signed-in users get the approved
   // web home (clay-map ViewHarness ?view=home) instead of the native RN remake.
   // Flip USE_WEB_HOME to false to restore the native MainApp tabs.
-  return <SafeAreaProvider><NavigationContainer><StatusBar style="light" />{user ? (USE_WEB_HOME ? <PostLoginHomeWebScreen /> : <MainApp />) : <AuthStack authError={authError} />}</NavigationContainer></SafeAreaProvider>;
+  return <SafeAreaProvider><NavigationContainer documentTitle={{ formatter: () => 'Poplur' }}><StatusBar style="light" />{user ? (USE_WEB_HOME ? <PostLoginHomeWebScreen /> : <MainApp />) : <AuthStack authError={authError} />}</NavigationContainer></SafeAreaProvider>;
 }
 
 function AuthStack({ authError }: { authError: string | null }) {
