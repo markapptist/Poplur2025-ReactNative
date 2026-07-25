@@ -7,6 +7,7 @@ import Server from '@dr.pogodin/react-native-static-server';
 import { unzip } from 'react-native-zip-archive';
 import WebView, { WebViewMessageEvent } from 'react-native-webview';
 import { PreloginWebScreen } from './PreloginWebScreen';
+import { getCurrentProfile } from '../services/profile';
 
 // Post-login HOME web embed (RN parity with iOS/Android Phase 3).
 //
@@ -25,7 +26,7 @@ import { PreloginWebScreen } from './PreloginWebScreen';
 // homeReady).
 
 // Bump when the staged claymap.zip changes so devices re-extract.
-const BUNDLE_VERSION = '16';
+const BUNDLE_VERSION = '17';
 
 const CLAYMAP_ZIP = require('../assets/claymap/claymap.zip');
 
@@ -86,6 +87,16 @@ export function PostLoginHomeWebScreen() {
     try {
       const message = JSON.parse(event.nativeEvent.data);
       if (message.type === 'homeReady' || message.type === 'mapReady') setHomeReady(true);
+      if (message.type === 'requestProfile') {
+        void getCurrentProfile().then(profile => {
+          if (!profile) return;
+          const business = (profile as UserProfileWithAccount).accountType === 'business'
+            || Boolean((profile as UserProfileWithAccount).businessProfile);
+          webViewRef.current?.injectJavaScript(
+            `window.poplurProfile?.(${JSON.stringify({ username: profile.username, business })}); true;`
+          );
+        }).catch(() => {});
+      }
       // pop / requestLocation / poiTap: native reactions land in a later pass.
     } catch {
       // Non-JSON messages are ignored.
@@ -120,6 +131,11 @@ export function PostLoginHomeWebScreen() {
     </View>
   );
 }
+
+type UserProfileWithAccount = {
+  accountType?: string;
+  businessProfile?: unknown;
+};
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#050407' },
