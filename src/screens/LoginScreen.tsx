@@ -2,20 +2,19 @@ import React, { useState } from 'react';
 import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, Pressable, SafeAreaView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
-import { signInWithEmailAndPassword } from 'firebase/auth';
-import { auth } from '../services/firebase';
+import { signInWithUsernameOrEmail } from '../services/auth';
 
 const scallops = Array.from({ length: 13 });
 
-export function LoginScreen({ navigation }: any) {
-  const [email, setEmail] = useState('');
+export function LoginScreen() {
+  const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
 
   async function login() {
     try {
       setLoading(true);
-      await signInWithEmailAndPassword(auth, email.trim(), password);
+      await signInWithUsernameOrEmail(identifier, password);
     } catch (e: any) {
       Alert.alert('Login failed', e.message);
     } finally {
@@ -30,15 +29,6 @@ export function LoginScreen({ navigation }: any) {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={styles.keyboard}
       >
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Back to welcome"
-          onPress={() => navigation.goBack()}
-          style={({ pressed }) => [styles.backButton, pressed && styles.backPressed]}
-        >
-          <Ionicons name="chevron-back" size={48} color="#161616" />
-        </Pressable>
-
         <View style={styles.ticket}>
           <PoplurMark />
 
@@ -47,13 +37,12 @@ export function LoginScreen({ navigation }: any) {
               <Text style={styles.fieldIcon}>@</Text>
               <TextInput
                 autoCapitalize="none"
-                autoComplete="email"
+                autoComplete="username"
                 autoCorrect={false}
-                keyboardType="email-address"
-                placeholder="E-Mail"
+                placeholder="Username or E-Mail"
                 placeholderTextColor="rgba(255,255,255,0.34)"
-                value={email}
-                onChangeText={setEmail}
+                value={identifier}
+                onChangeText={setIdentifier}
                 style={styles.input}
               />
             </View>
@@ -118,26 +107,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'flex-end',
     paddingBottom: 34
-  },
-  backButton: {
-    position: 'absolute',
-    left: 22,
-    top: 88,
-    width: 76,
-    height: 76,
-    borderRadius: 38,
-    backgroundColor: '#ffffff',
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#111',
-    shadowOpacity: 0.12,
-    shadowRadius: 26,
-    shadowOffset: { width: 0, height: 16 },
-    elevation: 10,
-    zIndex: 2
-  },
-  backPressed: {
-    transform: [{ scale: 0.96 }]
   },
   ticket: {
     width: '88%',

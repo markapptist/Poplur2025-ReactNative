@@ -1,6 +1,7 @@
-import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
+import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { auth, db } from './firebase';
 import type { UserProfile } from '../types/models';
+import { saveUserProfile } from './auth';
 
 export async function getCurrentProfile(): Promise<UserProfile | null> {
   const user = auth.currentUser;
@@ -8,14 +9,21 @@ export async function getCurrentProfile(): Promise<UserProfile | null> {
   const ref = doc(db, 'users', user.uid);
   const snap = await getDoc(ref);
   if (!snap.exists()) {
+    const username = user.displayName ?? user.email?.split('@')[0] ?? 'Poplur user';
     const profile = {
       uid: user.uid,
-      username: user.displayName ?? user.email?.split('@')[0] ?? 'Poplur user',
+      username,
       email: user.email ?? '',
+      accountType: 'personal',
       photoURL: user.photoURL ?? undefined,
       bio: ''
     };
-    await setDoc(ref, profile, { merge: true });
+    await saveUserProfile(user.uid, username, user.email ?? '', {
+      accountType: 'personal',
+      photoURL: user.photoURL ?? undefined,
+      bio: '',
+      createdAt: Date.now()
+    });
     return profile;
   }
   const data = snap.data();
@@ -23,6 +31,7 @@ export async function getCurrentProfile(): Promise<UserProfile | null> {
     uid: user.uid,
     username: data.username ?? user.displayName ?? 'Poplur user',
     email: data.email ?? user.email ?? '',
+    accountType: data.accountType === 'business' ? 'business' : 'personal',
     photoURL: data.photoURL,
     bio: data.bio ?? ''
   };
@@ -31,5 +40,9 @@ export async function getCurrentProfile(): Promise<UserProfile | null> {
 export async function updateCurrentProfile(updates: Partial<UserProfile>) {
   const user = auth.currentUser;
   if (!user) throw new Error('Not signed in');
+  if (updates.username) {
+    await saveUserProfile(user.uid, updates.username, user.email ?? '', updates);
+    return;
+  }
   await updateDoc(doc(db, 'users', user.uid), updates);
 }

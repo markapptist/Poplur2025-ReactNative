@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { Alert, StyleSheet, Text, TextInput } from 'react-native';
-import { createUserWithEmailAndPassword, updateProfile } from 'firebase/auth';
-import { doc, setDoc } from 'firebase/firestore';
-import { auth, db } from '../services/firebase';
+import { createUserWithEmailAndPassword } from 'firebase/auth';
+import { saveUserProfile } from '../services/auth';
+import { auth } from '../services/firebase';
 import { GradientBackground } from '../components/GradientBackground';
 import { GlassCard } from '../components/GlassCard';
 import { PrimaryButton } from '../components/PrimaryButton';
@@ -17,8 +17,7 @@ export function SignUpScreen() {
     try {
       setLoading(true);
       const cred = await createUserWithEmailAndPassword(auth, email.trim(), password);
-      await updateProfile(cred.user, { displayName: username.trim() || email.split('@')[0] });
-      await setDoc(doc(db, 'users', cred.user.uid), { uid: cred.user.uid, username: username.trim(), email: email.trim(), bio: '', createdAt: Date.now() }, { merge: true });
+      await saveUserProfile(cred.user.uid, username, email, { bio: '', createdAt: Date.now() });
     } catch (e: any) { Alert.alert('Signup failed', e.message); }
     finally { setLoading(false); }
   }

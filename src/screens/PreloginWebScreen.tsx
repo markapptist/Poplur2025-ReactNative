@@ -5,10 +5,10 @@ import * as FileSystem from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
 import { StatusBar } from 'expo-status-bar';
-import { createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile } from 'firebase/auth';
-import { doc, setDoc } from 'firebase/firestore';
+import { createUserWithEmailAndPassword } from 'firebase/auth';
 import WebView, { WebViewMessageEvent } from 'react-native-webview';
-import { auth, db } from '../services/firebase';
+import { saveUserProfile, signInWithUsernameOrEmail } from '../services/auth';
+import { auth } from '../services/firebase';
 
 type Page = 'splash' | 'welcome';
 type AssetModule = number;
@@ -22,7 +22,7 @@ const pageModules: Record<Page, AssetModule> = {
 // the mapping here means all three clients load the same approved HTML and the
 // same local media/model files; no RN-native screen remake is involved.
 const mediaModules: Array<[string, AssetModule]> = [
-  ['/Poplur2025-iOS/Poplur2025/Assets.xcassets/logo.imageset/logo1.png', require('../assets/prelogin/media/logo1.png')],
+  ['/Poplur2025-iOS/Poplur2025/Assets.xcassets/logo.imageset/logo3.png', require('../assets/welcome-logo.png')],
   ['/Poplur2025-iOS/Poplur2025/poplur_splash.mp4', require('../assets/prelogin/media/poplur_splash.mp4')],
   ['/Poplur2025-iOS/Poplur2025/pop.mp3', require('../assets/prelogin/media/pop.mp3')],
   ['/Poplur2025-iOS/Poplur2025/MarkHead_TalkingRig.glb', require('../assets/prelogin/media/MarkHead_TalkingRig.glb')],
@@ -300,12 +300,13 @@ export function PreloginWebScreen({ splashOnly = false }: { splashOnly?: boolean
         postAuthResult(false, 'Face ID sign-in isn’t available here yet — use your email and password.');
         return;
       }
-      if (!payload.email || !payload.password) {
-        postAuthResult(false, 'Enter your email and password.');
+      const identifier = payload.identifier || payload.email;
+      if (!identifier || !payload.password) {
+        postAuthResult(false, 'Enter your username or email and password.');
         return;
       }
       try {
-        await signInWithEmailAndPassword(auth, payload.email.trim(), payload.password);
+        await signInWithUsernameOrEmail(identifier, payload.password);
         postAuthResult(true);
       } catch (error: any) {
         postAuthResult(false, error?.message || 'Unable to sign in.');
@@ -320,13 +321,10 @@ export function PreloginWebScreen({ splashOnly = false }: { splashOnly?: boolean
       }
       try {
         const credential = await createUserWithEmailAndPassword(auth, payload.email.trim(), payload.password);
-        await updateProfile(credential.user, { displayName: payload.email.split('@')[0] });
-        await setDoc(doc(db, 'users', credential.user.uid), {
-          uid: credential.user.uid,
-          email: payload.email.trim(),
+        await saveUserProfile(credential.user.uid, payload.username || payload.email.split('@')[0], payload.email, {
           accountType: payload.accountType || 'personal',
           createdAt: Date.now()
-        }, { merge: true });
+        });
         postAuthResult(true);
       } catch (error: any) {
         postAuthResult(false, error?.message || 'Unable to create your account.');

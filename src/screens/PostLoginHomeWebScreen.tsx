@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Platform, StyleSheet, View } from 'react-native';
 import { Asset } from 'expo-asset';
 import * as FileSystem from 'expo-file-system';
 import { StatusBar } from 'expo-status-bar';
@@ -7,6 +7,7 @@ import Server from '@dr.pogodin/react-native-static-server';
 import { unzip } from 'react-native-zip-archive';
 import WebView, { WebViewMessageEvent } from 'react-native-webview';
 import { PreloginWebScreen } from './PreloginWebScreen';
+import { getCurrentProfile } from '../services/profile';
 
 // Post-login HOME web embed (RN parity with iOS/Android Phase 3).
 //
@@ -25,9 +26,10 @@ import { PreloginWebScreen } from './PreloginWebScreen';
 // homeReady).
 
 // Bump when the staged claymap.zip changes so devices re-extract.
-const BUNDLE_VERSION = '16';
+const BUNDLE_VERSION = '22';
 
 const CLAYMAP_ZIP = require('../assets/claymap/claymap.zip');
+const WEB_HOME_ORIGIN = 'http://127.0.0.1:5173';
 
 // Adapter: the clay bundle talks to Android via window.PoplurNative.onEvent(json).
 // Provide the same surface backed by ReactNativeWebView.postMessage, injected
@@ -61,9 +63,43 @@ export function PostLoginHomeWebScreen() {
   const serverRef = useRef<Server | null>(null);
   const [origin, setOrigin] = useState<string | null>(null);
   const [homeReady, setHomeReady] = useState(false);
+  const [profileQuery, setProfileQuery] = useState('');
+
+  const sendProfileToWeb = async () => {
+    try {
+      const profile = await getCurrentProfile();
+      const username = profile?.username?.trim();
+      if (!username) return;
+      const payload = JSON.stringify({
+        username,
+        business: profile?.accountType === 'business'
+      });
+      webViewRef.current?.injectJavaScript(`window.poplurProfile && window.poplurProfile(${payload}); true;`);
+    } catch (error) {
+      console.warn('[PostLoginHomeWebScreen] profile bridge failed', error);
+    }
+  };
+
+  useEffect(() => {
+    let active = true;
+    void getCurrentProfile()
+      .then(profile => {
+        const username = profile?.username?.trim();
+        if (active && username) {
+          const business = profile?.accountType === 'business' ? '&business=1' : '';
+          setProfileQuery(`&username=${encodeURIComponent(username)}${business}`);
+        }
+      })
+      .catch(error => console.warn('[PostLoginHomeWebScreen] profile lookup failed', error));
+    return () => { active = false; };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
+    if (Platform.OS === 'web') {
+      setOrigin(WEB_HOME_ORIGIN);
+      return () => { cancelled = true; };
+    }
     (async () => {
       try {
         const fileDir = await prepareBundle();
@@ -86,6 +122,7 @@ export function PostLoginHomeWebScreen() {
     try {
       const message = JSON.parse(event.nativeEvent.data);
       if (message.type === 'homeReady' || message.type === 'mapReady') setHomeReady(true);
+      if (message.type === 'requestProfile') void sendProfileToWeb();
       // pop / requestLocation / poiTap: native reactions land in a later pass.
     } catch {
       // Non-JSON messages are ignored.
@@ -99,10 +136,13 @@ export function PostLoginHomeWebScreen() {
         <WebView
           ref={webViewRef}
           style={styles.web}
-          source={{ uri: `${origin}/index.html?view=home&tabs=0` }}
+          source={{ uri: `${origin}/index.html?view=home&tabs=0${profileQuery}` }}
           originWhitelist={['*']}
           injectedJavaScriptBeforeContentLoaded={RN_NATIVE_SHELL}
           onMessage={handleMessage}
+          onLoadEnd={() => {
+            if (Platform.OS === 'web') setHomeReady(true);
+          }}
           allowsInlineMediaPlayback
           mediaPlaybackRequiresUserAction={false}
           javaScriptEnabled

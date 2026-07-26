@@ -17,6 +17,7 @@ export type UserProfile = {
   uid: string;
   username: string;
   email: string;
+  accountType?: 'personal' | 'business' | string;
   photoURL?: string;
   bio?: string;
 };

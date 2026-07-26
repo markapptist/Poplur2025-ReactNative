@@ -373,6 +373,11 @@
   #paneBusinessProfile .formStack { gap: clamp(3px, 1.1cqw, 7px); }
   #paneBusinessProfile .stackField { height: clamp(36px, 10cqw, 44px); }
   #paneBusinessProfile .stackLbl { margin: 2px 0 -5px; }
+  #paneCreateLogin .formStack { gap: clamp(3px, 1cqw, 6px); }
+  #paneCreateLogin .stackField { height: clamp(36px, 10cqw, 44px); }
+  #paneCreateLogin .stackLbl { margin: 1px 0 -5px; }
+  #paneCreateLogin .stackAgree { margin: 2px 0; }
+  #paneCreateLogin .stackBtn { margin-top: 5px; }
   .formStack::-webkit-scrollbar { display: none; }
   /* Inside a stack, everything flows — absolute positioning is neutralized so
      elements can never overlap regardless of screen size. */
@@ -539,8 +544,8 @@
     <div class="formStack">
       <p class="clayText paneTitle stackTitle">Sign in</p>
       <button class="cap-btn stackBtn" type="button" id="faceIdBtn"><span class="shader-text">Sign in with Face ID</span></button>
-      <p class="stackSub">or sign in with email</p>
-      <input class="field fieldMail" type="email" placeholder="E-Mail" autocomplete="email">
+      <p class="stackSub">or sign in with username</p>
+      <input class="field fieldMail" type="text" placeholder="Username or E-Mail" autocomplete="username">
       <div class="fieldWrap">
         <input class="field fieldPass" type="password" placeholder="Password" autocomplete="current-password">
         <button class="forgotBtn" type="button">FORGOT</button>
@@ -569,6 +574,8 @@
     <div class="formStack">
       <p class="clayText paneTitle stackTitle">Create login</p>
       <p class="stackSub">Then continue with onboarding.</p>
+      <span class="stackLbl">USERNAME</span>
+      <input class="stackField" type="text" placeholder="poplurname" autocomplete="username">
       <span class="stackLbl">EMAIL</span>
       <input class="stackField" type="email" placeholder="you@example.com" autocomplete="email">
       <span class="stackLbl">PASSWORD</span>
@@ -1223,10 +1230,10 @@
     // Login outcome drives the cube: valid details → success gesture; a bad
     // login shakes it onto the ERROR face and raises the alert.
     document.querySelector('#paneSignIn .paneBtn').addEventListener('click', function () {
-      var email = document.querySelector('#paneSignIn .fieldMail').value.trim()
+      var identifier = document.querySelector('#paneSignIn .fieldMail').value.trim()
       var pass = document.querySelector('#paneSignIn .fieldPass').value
-      if (/.+@.+\..+/.test(email) && pass.length >= 4) { var __p = window.poplurBridge && poplurBridge.signIn({ email: email, password: pass, method: 'password' }); if (!__p) cubeSuccess() }
-      else signupError('That login doesn’t look right — check your email and password.')
+      if (identifier.length >= 2 && pass.length >= 4) { var __p = window.poplurBridge && poplurBridge.signIn({ identifier: identifier, password: pass, method: 'password' }); if (!__p) cubeSuccess() }
+      else signupError('That login doesn’t look right — check your username and password.')
     })
     // Face ID sign-in: the simulated scan succeeds straight away.
     document.getElementById('faceIdBtn').addEventListener('click', function () { var __p = window.poplurBridge && poplurBridge.signIn({ method: 'faceid' }); if (!__p) cubeSuccess() })
@@ -1236,14 +1243,16 @@
     function isBusiness() { return document.querySelector('.acctB').classList.contains('on') }
     function finishSignup(message) {
       var acctType = isBusiness() ? 'business' : 'personal'
-      var suEmail = '', suPass = ''
+      var suUsername = '', suEmail = '', suPass = ''
       try {
+        var __un = document.querySelector('#paneCreateLogin input[autocomplete="username"]')
         var __em = document.querySelector('#paneCreateLogin input[type="email"]')
         var __pw = document.querySelectorAll('#paneCreateLogin input[type="password"]')
+        suUsername = __un ? __un.value.trim() : ''
         suEmail = __em ? __em.value.trim() : ''
         suPass = (__pw && __pw[0]) ? __pw[0].value : ''
       } catch (e) {}
-      var __posted = window.poplurBridge && poplurBridge.signUp({ email: suEmail, password: suPass, accountType: acctType })
+      var __posted = window.poplurBridge && poplurBridge.signUp({ username: suUsername, email: suEmail, password: suPass, accountType: acctType })
       if (!__posted) {
         cubeSuccess()
         if (window.__poplurShowAlert) window.__poplurShowAlert(message, 'Nice!')
@@ -1262,9 +1271,11 @@
     document.querySelector('#paneSignUp .paneBtn').addEventListener('click', function () { setPane(3) })
     // Create login → validated → Business profile (business) or done (personal)
     document.querySelector('#paneCreateLogin [data-signup-next]').addEventListener('click', function () {
+      var username = document.querySelector('#paneCreateLogin input[autocomplete="username"]').value.trim()
       var email = document.querySelector('#paneCreateLogin input[type="email"]').value.trim()
       var pws = document.querySelectorAll('#paneCreateLogin input[type="password"]')
       var agree = document.querySelector('#paneCreateLogin input[type="checkbox"]').checked
+      if (username.replace(/^@+/, '').length < 2) return signupError('Choose a username with at least 2 characters.')
       if (!/.+@.+\..+/.test(email)) return signupError('Enter a valid email address.')
       if (pws[0].value.length < 6) return signupError('Your password needs at least 6 characters.')
       if (pws[0].value !== pws[1].value) return signupError('Those passwords don’t match.')
