@@ -186,8 +186,9 @@ async function preparePage(page: Page): Promise<string> {
               hint.id = 'cubeBackHint';
               hint.textContent = 'Tap the cube to go back';
               // match the app's clay text (cream + layered clay shadow + rounded
-              // font), float + blink, and sit lower so it hovers under the cube.
-              hint.style.cssText = "position:fixed;left:50%;top:46%;transform:translateX(-50%);z-index:11;white-space:nowrap;pointer-events:none;display:none;font-family:'Arial Rounded MT Bold',ui-rounded,'SF Pro Rounded','Avenir Next',system-ui,sans-serif;font-size:13px;font-weight:800;letter-spacing:.3px;color:#f8efdc;text-shadow:0 -2px 0 rgba(255,255,255,0.4),0 2px 0 #d8b98e,0 4px 0 rgba(158,14,78,0.5),0 6px 8px rgba(104,2,48,0.5),0 12px 18px rgba(80,0,36,0.35);animation:poplurBackHint 1.6s ease-in-out infinite;";
+              // font), float + blink, and hover ABOVE the cube so it never sits
+              // over the alert window that pops beneath.
+              hint.style.cssText = "position:fixed;left:50%;top:26%;transform:translateX(-50%);z-index:11;white-space:nowrap;pointer-events:none;display:none;font-family:'Arial Rounded MT Bold',ui-rounded,'SF Pro Rounded','Avenir Next',system-ui,sans-serif;font-size:13px;font-weight:800;letter-spacing:.3px;color:#f8efdc;text-shadow:0 -2px 0 rgba(255,255,255,0.4),0 2px 0 #d8b98e,0 4px 0 rgba(158,14,78,0.5),0 6px 8px rgba(104,2,48,0.5),0 12px 18px rgba(80,0,36,0.35);animation:poplurBackHint 1.6s ease-in-out infinite;";
               document.body.appendChild(hint);
               var welcome = document.getElementById('paneWelcome');
               function update() {

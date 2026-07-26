@@ -24,6 +24,11 @@ import { ProfileScreen } from './src/screens/ProfileScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
 import { PoplurCube } from './src/components/PoplurCube';
 import type { AppTab } from './src/types/models';
+import {
+  markScreenNavigation,
+  PerformanceMonitor,
+  ProfiledScreen,
+} from './src/performance/ScreenProfiler';
 
 // Web-only: the app's screens are designed for a phone's portrait aspect ratio,
 // so a wide desktop window collapses their vertical layout (text overlaps
@@ -58,31 +63,50 @@ export default function App() {
   useEffect(() => {
     // Fall back to logged-out after 4 s so a slow/offline Firebase never
     // leaves the app pinned on the loading screen.
-    const timeout = setTimeout(() => setUser(null), 4000);
+    const timeout = setTimeout(() => {
+      markScreenNavigation('PreloginWebScreen');
+      setUser(null);
+    }, 4000);
     let unsubscribe: (() => void) | undefined;
     try {
       unsubscribe = onAuthStateChanged(auth, user => {
         clearTimeout(timeout);
+        markScreenNavigation(user ? 'PostLoginHomeWebScreen' : 'PreloginWebScreen');
         setUser(user);
       }, error => {
         clearTimeout(timeout);
+        markScreenNavigation('PreloginWebScreen');
         setAuthError(error.message);
         setUser(null);
       });
     } catch (error: any) {
       clearTimeout(timeout);
+      markScreenNavigation('PreloginWebScreen');
       setAuthError(error.message);
       setUser(null);
     }
     return () => { clearTimeout(timeout); unsubscribe?.(); };
   }, []);
 
-  if (user === undefined) return <SplashScreen />;
+  // DEV bypass (dev builds only): ?devAuth=1 skips the Firebase auth gate and
+  // lands in the *current* post-login home (the approved clay web home, same as
+  // a real signed-in user) for building sub-screens. Append &native=1 to see the
+  // deprecated native MainApp tabs instead. Inert without the flag, and dead in
+  // production builds since __DEV__ is false there — nothing to revert.
+  if (__DEV__ && typeof window !== 'undefined'
+    && new URLSearchParams(window.location.search).get('devAuth') === '1') {
+    const wantNative = new URLSearchParams(window.location.search).get('native') === '1';
+    return <SafeAreaProvider><PerformanceMonitor /><NavigationContainer documentTitle={{ formatter: () => 'Poplur' }}><StatusBar style="light" />{wantNative ? <MainApp /> : <ProfiledScreen name="PostLoginHomeWebScreen"><PostLoginHomeWebScreen /></ProfiledScreen>}</NavigationContainer></SafeAreaProvider>;
+  }
+
+  if (user === undefined) {
+    return <SafeAreaProvider><PerformanceMonitor /><ProfiledScreen name="SplashScreen"><SplashScreen /></ProfiledScreen></SafeAreaProvider>;
+  }
 
   // Post-login parity with iOS/Android Phase 3: signed-in users get the approved
   // web home (clay-map ViewHarness ?view=home) instead of the native RN remake.
   // Flip USE_WEB_HOME to false to restore the native MainApp tabs.
-  return <SafeAreaProvider><NavigationContainer documentTitle={{ formatter: () => 'Poplur' }}><StatusBar style="light" />{user ? (USE_WEB_HOME ? <PostLoginHomeWebScreen /> : <MainApp />) : <AuthStack authError={authError} />}</NavigationContainer></SafeAreaProvider>;
+  return <SafeAreaProvider><PerformanceMonitor /><NavigationContainer documentTitle={{ formatter: () => 'Poplur' }}><StatusBar style="light" />{user ? (USE_WEB_HOME ? <ProfiledScreen name="PostLoginHomeWebScreen"><PostLoginHomeWebScreen /></ProfiledScreen> : <MainApp />) : <AuthStack authError={authError} />}</NavigationContainer></SafeAreaProvider>;
 }
 
 function AuthStack({ authError }: { authError: string | null }) {
@@ -90,20 +114,31 @@ function AuthStack({ authError }: { authError: string | null }) {
     {/* iOS physical is the source baseline: render the same approved GCL web
         bundle on RN rather than maintaining a divergent native remake. */}
     <Stack.Screen name="Prelogin">
-      {() => <PreloginWebScreen />}
+      {() => <ProfiledScreen name="PreloginWebScreen"><PreloginWebScreen /></ProfiledScreen>}
     </Stack.Screen>
   </Stack.Navigator>;
 }
 
 function MainApp() {
   const [tab, setTab] = useState<AppTab>('feed');
+  const selectTab = (nextTab: AppTab) => {
+    const profilerNames: Record<AppTab, string> = {
+      feed: 'FeedScreen',
+      map: 'MapScreen',
+      record: 'CameraScreen',
+      profile: 'ProfileScreen',
+      settings: 'SettingsScreen',
+    };
+    markScreenNavigation(profilerNames[nextTab]);
+    setTab(nextTab);
+  };
   return <View style={styles.main}>
-    {tab === 'feed' && <FeedScreen />}
-    {tab === 'map' && <MapScreen />}
-    {tab === 'record' && <CameraScreen />}
-    {tab === 'profile' && <ProfileScreen />}
-    {tab === 'settings' && <SettingsScreen />}
-    <View style={styles.cubeLayer}><PoplurCube activeTab={tab} onTabChange={setTab} /></View>
+    {tab === 'feed' && <ProfiledScreen name="FeedScreen"><FeedScreen /></ProfiledScreen>}
+    {tab === 'map' && <ProfiledScreen name="MapScreen"><MapScreen /></ProfiledScreen>}
+    {tab === 'record' && <ProfiledScreen name="CameraScreen"><CameraScreen /></ProfiledScreen>}
+    {tab === 'profile' && <ProfiledScreen name="ProfileScreen"><ProfileScreen /></ProfiledScreen>}
+    {tab === 'settings' && <ProfiledScreen name="SettingsScreen"><SettingsScreen /></ProfiledScreen>}
+    <View style={styles.cubeLayer}><PoplurCube activeTab={tab} onTabChange={selectTab} /></View>
   </View>;
 }
 
