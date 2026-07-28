@@ -9,6 +9,7 @@ import { createUserWithEmailAndPassword } from 'firebase/auth';
 import WebView, { WebViewMessageEvent } from 'react-native-webview';
 import { saveUserProfile, signInWithUsernameOrEmail } from '../services/auth';
 import { auth } from '../services/firebase';
+import { markPermissionPrimerHandled } from '../services/permissionPrimer';
 
 type Page = 'splash' | 'welcome';
 type AssetModule = number;
@@ -252,8 +253,12 @@ async function preparePage(page: Page): Promise<string> {
   return html;
 }
 
-export function PreloginWebScreen({ splashOnly = false }: { splashOnly?: boolean }) {
+export function PreloginWebScreen({ splashOnly = false, onPermissionSequenceHandled }: {
+  splashOnly?: boolean;
+  onPermissionSequenceHandled?: () => void;
+}) {
   const webViewRef = useRef<WebView>(null);
+  const permissionChoicesRef = useRef(new Set<'location' | 'photos'>());
   // Launch splash dropped (parity with iOS/Android): straight to Welcome on black.
   const [page, setPage] = useState<Page>(splashOnly ? 'splash' : 'welcome');
   const [html, setHtml] = useState<string | null>(null);
@@ -334,9 +339,29 @@ export function PreloginWebScreen({ splashOnly = false }: { splashOnly?: boolean
     }
 
     if (action === 'requestPermission') {
+      const permission = payload.permission;
+      if (permission === 'location') permissionChoicesRef.current.add('location');
+      if (permission === 'camera') permissionChoicesRef.current.add('photos');
+      if (permissionChoicesRef.current.size === 2) onPermissionSequenceHandled?.();
+
+      // The clay choice is the primer. Only its affirmative action is allowed
+      // to open the matching OS prompt; "Don't Allow" stays entirely inside
+      // Poplur and must never fall through to Expo.
       try {
-        if (payload.permission === 'location') await Location.requestForegroundPermissionsAsync();
-        if (payload.permission === 'camera') await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (permission === 'location') {
+          await markPermissionPrimerHandled('location').catch(error =>
+            console.warn('[PreloginWebScreen] location primer state save failed', error));
+        }
+        if (permission === 'camera') {
+          await markPermissionPrimerHandled('photos').catch(error =>
+            console.warn('[PreloginWebScreen] photo primer state save failed', error));
+        }
+        if (permission === 'location' && payload.choice !== 'location-deny') {
+          await Location.requestForegroundPermissionsAsync();
+        }
+        if (permission === 'camera' && payload.choice === 'allow') {
+          await ImagePicker.requestMediaLibraryPermissionsAsync();
+        }
       } catch (error) {
         console.warn('[PreloginWebScreen] permission request failed', error);
       }

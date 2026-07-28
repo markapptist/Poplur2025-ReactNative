@@ -27,6 +27,11 @@ export async function uploadPostMedia(params: {
   mediaType: 'photo' | 'video' | 'photo_profile' | 'video_profile';
   latitude?: number;
   longitude?: number;
+  caption?: string;
+  channelId?: string;
+  filterId?: string;
+  usedAI?: boolean;
+  radiusMeters?: number;
   onProgress?: (progress: number) => void;
 }) {
   const user = auth.currentUser;
@@ -51,7 +56,7 @@ export async function uploadPostMedia(params: {
     mediaURL,
     mediaType: params.mediaType,
     viewCount: 0,
-    radius: 5000,
+    radius: params.radiusMeters ?? 5000,
     createdAt: serverTimestamp()
   };
 
@@ -59,6 +64,10 @@ export async function uploadPostMedia(params: {
     data.latitude = params.latitude;
     data.longitude = params.longitude;
   }
+  if (params.caption?.trim()) data.caption = params.caption.trim();
+  if (params.channelId) data.channelId = params.channelId;
+  if (params.filterId) data.filterId = params.filterId;
+  if (params.usedAI) data.usedAI = true;
 
   await addDoc(postsCollection, data);
   return mediaURL;

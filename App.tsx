@@ -54,6 +54,12 @@ export default function App() {
   const [user, setUser] = useState<User | null | undefined>(undefined);
   const [authError, setAuthError] = useState<string | null>(null);
   const [isSplashMinimumElapsed, setIsSplashMinimumElapsed] = useState(false);
+  // A signed-out launch already owns the custom permission sequence in the
+  // approved pre-login surface. Keep that fact in memory for this app launch
+  // so the immediate auth handoff does not show the same primers again in
+  // Home. A returning persisted session never mounts pre-login, so this stays
+  // false and Home checks the real OS statuses before choosing what to ask.
+  const [preloginPermissionsHandled, setPreloginPermissionsHandled] = useState(false);
 
   useEffect(() => {
     const timer = setTimeout(() => setIsSplashMinimumElapsed(true), 3500);
@@ -65,6 +71,7 @@ export default function App() {
     // leaves the app pinned on the loading screen.
     const timeout = setTimeout(() => {
       markScreenNavigation('PreloginWebScreen');
+      setPreloginPermissionsHandled(false);
       setUser(null);
     }, 4000);
     let unsubscribe: (() => void) | undefined;
@@ -72,17 +79,20 @@ export default function App() {
       unsubscribe = onAuthStateChanged(auth, user => {
         clearTimeout(timeout);
         markScreenNavigation(user ? 'PostLoginHomeWebScreen' : 'PreloginWebScreen');
+        if (!user) setPreloginPermissionsHandled(false);
         setUser(user);
       }, error => {
         clearTimeout(timeout);
         markScreenNavigation('PreloginWebScreen');
         setAuthError(error.message);
+        setPreloginPermissionsHandled(false);
         setUser(null);
       });
     } catch (error: any) {
       clearTimeout(timeout);
       markScreenNavigation('PreloginWebScreen');
       setAuthError(error.message);
+      setPreloginPermissionsHandled(false);
       setUser(null);
     }
     return () => { clearTimeout(timeout); unsubscribe?.(); };
@@ -96,7 +106,7 @@ export default function App() {
   if (__DEV__ && typeof window !== 'undefined'
     && new URLSearchParams(window.location.search).get('devAuth') === '1') {
     const wantNative = new URLSearchParams(window.location.search).get('native') === '1';
-    return <SafeAreaProvider><PerformanceMonitor /><NavigationContainer documentTitle={{ formatter: () => 'Poplur' }}><StatusBar style="light" />{wantNative ? <MainApp /> : <ProfiledScreen name="PostLoginHomeWebScreen"><PostLoginHomeWebScreen /></ProfiledScreen>}</NavigationContainer></SafeAreaProvider>;
+    return <SafeAreaProvider><PerformanceMonitor /><NavigationContainer documentTitle={{ formatter: () => 'Poplur' }}><StatusBar style="light" />{wantNative ? <MainApp /> : <ProfiledScreen name="PostLoginHomeWebScreen"><PostLoginHomeWebScreen forcePermissionPrimer /></ProfiledScreen>}</NavigationContainer></SafeAreaProvider>;
   }
 
   if (user === undefined) {
@@ -106,15 +116,18 @@ export default function App() {
   // Post-login parity with iOS/Android Phase 3: signed-in users get the approved
   // web home (clay-map ViewHarness ?view=home) instead of the native RN remake.
   // Flip USE_WEB_HOME to false to restore the native MainApp tabs.
-  return <SafeAreaProvider><PerformanceMonitor /><NavigationContainer documentTitle={{ formatter: () => 'Poplur' }}><StatusBar style="light" />{user ? (USE_WEB_HOME ? <ProfiledScreen name="PostLoginHomeWebScreen"><PostLoginHomeWebScreen /></ProfiledScreen> : <MainApp />) : <AuthStack authError={authError} />}</NavigationContainer></SafeAreaProvider>;
+  return <SafeAreaProvider><PerformanceMonitor /><NavigationContainer documentTitle={{ formatter: () => 'Poplur' }}><StatusBar style="light" />{user ? (USE_WEB_HOME ? <ProfiledScreen name="PostLoginHomeWebScreen"><PostLoginHomeWebScreen skipPermissionPrimer={preloginPermissionsHandled} /></ProfiledScreen> : <MainApp />) : <AuthStack authError={authError} onPermissionSequenceHandled={() => setPreloginPermissionsHandled(true)} />}</NavigationContainer></SafeAreaProvider>;
 }
 
-function AuthStack({ authError }: { authError: string | null }) {
+function AuthStack({ authError, onPermissionSequenceHandled }: {
+  authError: string | null;
+  onPermissionSequenceHandled: () => void;
+}) {
   return <Stack.Navigator screenOptions={{ headerShown: false, contentStyle: { backgroundColor: '#050713' } }}>
     {/* iOS physical is the source baseline: render the same approved GCL web
         bundle on RN rather than maintaining a divergent native remake. */}
     <Stack.Screen name="Prelogin">
-      {() => <ProfiledScreen name="PreloginWebScreen"><PreloginWebScreen /></ProfiledScreen>}
+      {() => <ProfiledScreen name="PreloginWebScreen"><PreloginWebScreen onPermissionSequenceHandled={onPermissionSequenceHandled} /></ProfiledScreen>}
     </Stack.Screen>
   </Stack.Navigator>;
 }

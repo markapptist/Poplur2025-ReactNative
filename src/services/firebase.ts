@@ -12,7 +12,10 @@ const firebaseConfig = {
   projectId: 'poplur2025',
   storageBucket: 'poplur2025.firebasestorage.app',
   messagingSenderId: '440480901104',
-  appId: '1:440480901104:web:replace-with-web-app-id'
+  // There is no separately registered Firebase Web client. The RN bridge uses
+  // the existing Poplur iOS app identity so Firebase services target the same
+  // project instead of failing initialization on a placeholder app id.
+  appId: '1:440480901104:ios:fb94ca04e37cd1d68c1f35'
 };
 
 export const firebaseApp = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);

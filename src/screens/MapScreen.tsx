@@ -6,6 +6,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
 import { fetchRecentPosts, uploadPostMedia } from '../services/posts';
 import type { Post } from '../types/models';
+import { loadMapMode, mark2DNoticeSeen, shouldShow2DNotice, type MapMode } from '../services/mapMode';
 
 const toronto: LatLng = { latitude: 43.6532, longitude: -79.3832 };
 const earthRadiusKm = 6371;
@@ -18,12 +19,12 @@ const worldCamera: Camera = {
   zoom: 1
 };
 
-function locationCamera(coordinate: LatLng): Partial<Camera> {
+function locationCamera(coordinate: LatLng, mode: MapMode): Partial<Camera> {
   return {
     center: coordinate,
     altitude: Platform.OS === 'ios' ? 900 : undefined,
-    heading: 28,
-    pitch: Platform.OS === 'ios' ? 68 : 58,
+    heading: mode === '2d' ? 0 : 28,
+    pitch: mode === '2d' ? 0 : Platform.OS === 'ios' ? 68 : 58,
     zoom: Platform.OS === 'android' ? 18 : undefined
   };
 }
@@ -38,12 +39,13 @@ export function MapScreen() {
   const [uploading, setUploading] = useState(false);
   const [mapReady, setMapReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [mapMode, setMapMode] = useState<MapMode>('3d');
 
   const mappedPosts = useMemo(() => posts.filter(post => post.latitude != null && post.longitude != null), [posts]);
   const totalViews = useMemo(() => mappedPosts.reduce((sum, post) => sum + post.viewCount, 0), [mappedPosts]);
   const radiusKm = selected ? Math.max(0, Math.round(distanceKm(currentLocation ?? toronto, selected))) : 0;
   const isAndroid = Platform.OS === 'android';
-  const mapType = Platform.OS === 'ios' ? 'hybridFlyover' : 'hybrid';
+  const mapType = mapMode === '2d' ? 'standard' : Platform.OS === 'ios' ? 'hybridFlyover' : 'hybrid';
   const responsive = useMemo(() => {
     const shortSide = Math.min(width, height);
     const isTablet = shortSide >= 600;
@@ -87,10 +89,23 @@ export function MapScreen() {
   }, []);
 
   const flyToLocation = useCallback((coordinate: LatLng, duration = 2600) => {
-    mapRef.current?.animateCamera(locationCamera(coordinate), { duration });
-  }, []);
+    mapRef.current?.animateCamera(locationCamera(coordinate, mapMode), { duration });
+  }, [mapMode]);
 
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    loadMapMode().then(async ({ mode, automatic }) => {
+      setMapMode(mode);
+      if (mode === '2d' && automatic && await shouldShow2DNotice()) {
+        Alert.alert(
+          'Poplur Map is using 2D',
+          'This phone may not run the 3D Poplur Map smoothly. The faster clay 2D map keeps the same posts and map tools. You can try 3D in Settings.',
+          [{ text: 'OK', onPress: () => { mark2DNoticeSeen(); } }]
+        );
+      }
+    });
+  }, []);
 
   useEffect(() => { (async () => {
     try {
@@ -144,7 +159,7 @@ export function MapScreen() {
       loadingBackgroundColor="#000"
       loadingIndicatorColor="#fff"
       moveOnMarkerPress={false}
-      showsBuildings
+      showsBuildings={mapMode === '3d'}
       showsCompass={false}
       showsMyLocationButton={false}
       showsPointsOfInterest
