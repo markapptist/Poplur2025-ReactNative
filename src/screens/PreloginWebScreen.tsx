@@ -65,21 +65,6 @@ async function readHtml(moduleRef: AssetModule): Promise<string> {
   return FileSystem.readAsStringAsync(uri);
 }
 
-// Performance mode (perf > aesthetic): the app uses the lightweight static clay
-// cube everywhere. The real Three.js (GPU) login cube costs ~12 fps, so it's off
-// by default. `?cube=gl` force-enables the real cube (e.g. for A/B testing);
-// anything else uses the static fallback.
-function shouldUseFallbackCube(): boolean {
-  if (Platform.OS !== 'web') return true;
-  if (typeof document === 'undefined') return true;
-  try {
-    if (new URLSearchParams(window.location.search).get('cube') === 'gl') return false;
-  } catch {
-    /* ignore */
-  }
-  return true;
-}
-
 // The app's own /poplur-clay-map three paths aren't served on web, so point the
 // importmap + DRACO decoder at a CDN pinned to the version the cube was authored
 // against (0.170.0). unpkg serves the raw modules, keeping a single three
@@ -88,6 +73,43 @@ const THREE_BUILD_PATH = '/poplur-clay-map/node_modules/three/build/three.module
 const THREE_ADDONS_PATH = '/poplur-clay-map/node_modules/three/examples/jsm/';
 const THREE_BUILD_CDN = 'https://unpkg.com/three@0.170.0/build/three.module.js';
 const THREE_ADDONS_CDN = 'https://unpkg.com/three@0.170.0/examples/jsm/';
+
+// The canonical page rebuilds the real login cube in place after renderer,
+// model, or context-loss failures. This bridge only asks React Native to remount
+// the WebView when the module itself never loaded, so the generic flat cube is
+// never substituted.
+const LOGIN_CUBE_HOST_RECOVERY = `<script id="poplur-login-cube-host-recovery">
+(function () {
+  var readySent = false, failedSamples = 0, lastHostRecovery = 0;
+  function post(action, payload) {
+    try {
+      if (window.PoplurNative && typeof window.PoplurNative.onAction === 'function') {
+        window.PoplurNative.onAction(action, JSON.stringify(payload || {}));
+      }
+    } catch (e) {}
+  }
+  function check() {
+    var stage = document.getElementById('lcubeStage');
+    var canvas = document.getElementById('cubeGL');
+    var ready = !!(stage && canvas && stage.dataset.cubeRenderer === 'ready'
+      && stage.classList.contains('gl') && canvas.getBoundingClientRect().width > 8);
+    if (ready) {
+      failedSamples = 0;
+      if (!readySent) { readySent = true; post('loginCubeReady'); }
+      return;
+    }
+    failedSamples += 1;
+    if (typeof window.__poplurRebuildLoginCube === 'function') return;
+    if (failedSamples < 2 || Date.now() - lastHostRecovery < 1500) return;
+    failedSamples = 0;
+    lastHostRecovery = Date.now();
+    post('loginCubeHostRebuild', { reason: 'module-not-ready' });
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', check);
+  else check();
+  setInterval(check, 1000);
+})();
+</script>`;
 
 // Performance tweaks injected into every pre-login page (perf > aesthetic):
 // - the full-screen permission blur (backdrop-filter) is the priciest effect
@@ -136,114 +158,13 @@ async function preparePage(page: Page): Promise<string> {
     html = html.split(sourcePath).join(await localUri(moduleRef));
   }
 
-  if (shouldUseFallbackCube()) {
-    if (Platform.OS === 'web') {
-      // Web: keep the Three.js module so the sign-up account-type previews (the
-      // mark head / business buildings — each rendered ONCE and frozen to an
-      // image, so they cost ~nothing at steady state) still appear. Just disable
-      // the *continuous* login cube: point three at the CDN and remove #cubeGL so
-      // its renderer bails (getElementById returns null) — no spin, no FPS cost.
-      html = html
-        .split(THREE_BUILD_PATH).join(THREE_BUILD_CDN)
-        .split(THREE_ADDONS_PATH).join(THREE_ADDONS_CDN)
-        .replace(/<canvas\s+id=["']cubeGL["'][^>]*>\s*<\/canvas>/i, '');
-      // If three can't load (e.g. offline), still reveal the static clay cube.
-      html = html.replace('</head>', `<script>
-        window.addEventListener('error', function (e) {
-          var t = e && e.target;
-          if (t && t.tagName === 'SCRIPT' && String(t.src || '').indexOf('three@0.170.0') !== -1) {
-            var s = document.getElementById('lcubeStage'); if (s) s.classList.add('flat');
-          }
-        }, true);
-      </script></head>`);
-    } else {
-      // Native: drop the Three.js module entirely (approved static clay cube).
-      html = html.replace(/<script\s+type=["']importmap["'][\s\S]*?<\/script>/gi, '');
-      html = html.replace(/<script\s+type=["']module["'][\s\S]*?<\/script>/gi, '');
-    }
-    if (page === 'welcome') {
-      // The GL cube module normally registers window.__poplurCubeOnBack to make
-      // the cube the back button on sub-screens; the static fallback doesn't, so
-      // wire it here. It must be defined BEFORE the page's nav script calls it,
-      // so inject at the very start of <head>. Adds a hint under the cube that
-      // only shows when "back" is available.
-      html = html.replace(/<head[^>]*>/i, (headTag) => `${headTag}<script>
-        (function () {
-          var real = null, wired = false;
-          function wireCube(goBack) {
-            function setup() {
-              var stage = document.getElementById('lcubeStage');
-              if (!stage) { setTimeout(setup, 80); return; }
-              if (wired) return; wired = true;
-              stage.style.cursor = 'pointer';
-              var sx = 0, sy = 0, moved = false;
-              stage.addEventListener('pointerdown', function (e) { moved = false; sx = e.clientX; sy = e.clientY; });
-              stage.addEventListener('pointermove', function (e) { if (Math.abs(e.clientX - sx) > 6 || Math.abs(e.clientY - sy) > 6) moved = true; });
-              stage.addEventListener('pointerup', function () { if (!moved && typeof goBack === 'function') goBack(); });
-              var kf = document.createElement('style');
-              kf.textContent = "@keyframes poplurBackHint{0%,100%{transform:translateX(-50%) translateY(0)}50%{transform:translateX(-50%) translateY(-6px)}}";
-              document.head.appendChild(kf);
-              var hint = document.createElement('div');
-              hint.id = 'cubeBackHint';
-              hint.textContent = 'Tap the cube to go back';
-              // match the app's clay text (cream + layered clay shadow + rounded
-              // font), float + blink, and hover ABOVE the cube so it never sits
-              // over the alert window that pops beneath.
-              hint.style.cssText = "position:fixed;left:50%;top:26%;transform:translateX(-50%);z-index:11;white-space:nowrap;pointer-events:none;display:none;font-family:'Arial Rounded MT Bold',ui-rounded,'SF Pro Rounded','Avenir Next',system-ui,sans-serif;font-size:13px;font-weight:800;letter-spacing:.3px;color:#f8efdc;text-shadow:0 -2px 0 rgba(255,255,255,0.4),0 2px 0 #d8b98e,0 4px 0 rgba(158,14,78,0.5),0 6px 8px rgba(104,2,48,0.5),0 12px 18px rgba(80,0,36,0.35);animation:poplurBackHint 1.6s ease-in-out infinite;";
-              document.body.appendChild(hint);
-              var welcome = document.getElementById('paneWelcome');
-              function update() {
-                var t = welcome ? (welcome.style.transform || '') : '';
-                var onWelcome = t === '' || /translateX\\(0%?\\)/.test(t);
-                hint.style.display = onWelcome ? 'none' : 'block';
-              }
-              update();
-              var mo = new MutationObserver(update);
-              document.querySelectorAll('.pane').forEach(function (p) { mo.observe(p, { attributes: true, attributeFilter: ['style'] }); });
-            }
-            if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', setup);
-            else setup();
-          }
-          // The page assigns window.__poplurCubeOnBack (its own back-handler
-          // registrar) and then calls it with goBack; the tap->goBack call itself
-          // lived in the GL cube module we strip. Intercept via an accessor: keep
-          // the page's registrar working, and also wire the fallback cube to goBack.
-          try {
-            Object.defineProperty(window, '__poplurCubeOnBack', {
-              configurable: true,
-              get: function () { return real ? function (fn) { try { real(fn); } catch (e) {} wireCube(fn); } : undefined; },
-              set: function (v) { real = v; }
-            });
-          } catch (e) {}
-        })();
-      </script>`);
-      html = html.replace('</body>', `<script>
-        (function () {
-          function revealCube() {
-            var stage = document.getElementById('lcubeStage');
-            if (stage) stage.classList.add('flat');
-          }
-          if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', revealCube);
-          else revealCube();
-        })();
-      </script></body>`);
-    }
-  } else {
-    // Web with a capable GPU: run the real Three.js login cube. Repoint its
-    // three/addons/draco paths at the CDN (models were already rewritten to
-    // served URLs above). If three can't load (e.g. offline), reveal the static
-    // clay cube so the slot is never empty.
-    html = html
-      .split(THREE_BUILD_PATH).join(THREE_BUILD_CDN)
-      .split(THREE_ADDONS_PATH).join(THREE_ADDONS_CDN);
-    html = html.replace('</head>', `<script>
-      window.addEventListener('error', function (e) {
-        var t = e && e.target;
-        if (t && t.tagName === 'SCRIPT' && String(t.src || '').indexOf('three@0.170.0') !== -1) {
-          var s = document.getElementById('lcubeStage'); if (s) s.classList.add('flat');
-        }
-      }, true);
-    </script></head>`);
+  // Always run the approved live login cube. The page's own watchdog retries
+  // the GLB on a fresh canvas; RN only remounts if the Three module never loaded.
+  html = html
+    .split(THREE_BUILD_PATH).join(THREE_BUILD_CDN)
+    .split(THREE_ADDONS_PATH).join(THREE_ADDONS_CDN);
+  if (page === 'welcome') {
+    html = html.replace('</head>', `${LOGIN_CUBE_HOST_RECOVERY}</head>`);
   }
 
   // Performance tweaks (blur -> dim, halve confetti, half-res map canvas).
@@ -259,9 +180,13 @@ export function PreloginWebScreen({ splashOnly = false, onPermissionSequenceHand
 }) {
   const webViewRef = useRef<WebView>(null);
   const permissionChoicesRef = useRef(new Set<'location' | 'photos'>());
+  const cubeReadyRef = useRef(false);
+  const cubeHostRecoveryAttemptRef = useRef(0);
+  const cubeHostRecoveryAtRef = useRef(0);
   // Launch splash dropped (parity with iOS/Android): straight to Welcome on black.
   const [page, setPage] = useState<Page>(splashOnly ? 'splash' : 'welcome');
   const [html, setHtml] = useState<string | null>(null);
+  const [cubeHostRecoveryKey, setCubeHostRecoveryKey] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -300,6 +225,25 @@ export function PreloginWebScreen({ splashOnly = false, onPermissionSequenceHand
     const action = message.action;
     let payload: Record<string, string> = {};
     try { payload = JSON.parse(message.payload || '{}'); } catch { /* malformed bridge payload */ }
+
+    if (action === 'loginCubeReady') {
+      cubeReadyRef.current = true;
+      cubeHostRecoveryAttemptRef.current = 0;
+      return;
+    }
+
+    if (action === 'loginCubeHostRebuild' && page === 'welcome') {
+      const now = Date.now();
+      const retryDelay = Math.min(
+        8000,
+        1500 * (2 ** Math.min(cubeHostRecoveryAttemptRef.current, 3))
+      );
+      if (cubeReadyRef.current || now - cubeHostRecoveryAtRef.current < retryDelay) return;
+      cubeHostRecoveryAtRef.current = now;
+      cubeHostRecoveryAttemptRef.current += 1;
+      setCubeHostRecoveryKey(value => value + 1);
+      return;
+    }
 
     if (action === 'signIn') {
       if (payload.method === 'faceid') {
@@ -375,6 +319,7 @@ export function PreloginWebScreen({ splashOnly = false, onPermissionSequenceHand
       <StatusBar style="light" />
       {source ? (
         <WebView
+          key={`prelogin-${page}-${cubeHostRecoveryKey}`}
           ref={webViewRef}
           source={source}
           originWhitelist={['*']}
