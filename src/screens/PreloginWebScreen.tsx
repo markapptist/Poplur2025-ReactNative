@@ -344,9 +344,9 @@ export function PreloginWebScreen({ splashOnly = false, onPermissionSequenceHand
       if (permission === 'camera') permissionChoicesRef.current.add('photos');
       if (permissionChoicesRef.current.size === 2) onPermissionSequenceHandled?.();
 
-      // The clay choice is the primer. Only its affirmative action is allowed
-      // to open the matching OS prompt; "Don't Allow" stays entirely inside
-      // Poplur and must never fall through to Expo.
+      // The clay choice is the primer. It records the answer but never opens an
+      // Expo/OS prompt on top of the approved Poplur card. A real prompt is
+      // deferred until the feature that needs the capability is used.
       try {
         if (permission === 'location') {
           await markPermissionPrimerHandled('location').catch(error =>
@@ -355,12 +355,6 @@ export function PreloginWebScreen({ splashOnly = false, onPermissionSequenceHand
         if (permission === 'camera') {
           await markPermissionPrimerHandled('photos').catch(error =>
             console.warn('[PreloginWebScreen] photo primer state save failed', error));
-        }
-        if (permission === 'location' && payload.choice !== 'location-deny') {
-          await Location.requestForegroundPermissionsAsync();
-        }
-        if (permission === 'camera' && payload.choice === 'allow') {
-          await ImagePicker.requestMediaLibraryPermissionsAsync();
         }
       } catch (error) {
         console.warn('[PreloginWebScreen] permission request failed', error);

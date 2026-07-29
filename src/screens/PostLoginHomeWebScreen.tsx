@@ -246,7 +246,9 @@ export function PostLoginHomeWebScreen({
   const requestAndPushLocation = useCallback(async () => {
     await markPermissionPrimerHandled('location').catch(error =>
       console.warn('[PostLoginHomeWebScreen] location primer state save failed', error));
-    const permission = await Location.requestForegroundPermissionsAsync();
+    // The custom clay primer is the only startup permission UI. Reuse an
+    // existing grant, but never stack the Expo/OS sheet on top of that card.
+    const permission = await Location.getForegroundPermissionsAsync();
     if (!permission.granted) return;
     const fix = await Location.getCurrentPositionAsync({
       accuracy: Location.Accuracy.Balanced,
@@ -379,14 +381,14 @@ export function PostLoginHomeWebScreen({
         const rememberPhotos = markPermissionPrimerHandled('photos').catch(error =>
           console.warn('[PostLoginHomeWebScreen] photo primer state save failed', error));
         // The first post-login request while askPhotos=1 is the approved custom
-        // primer's Allow action. It should open only the OS permission prompt,
-        // not unexpectedly launch the system picker. Later requests come from
-        // the actual Camera Roll surface and retain the existing picker flow.
+        // primer's Allow action. It should not open an OS prompt or picker.
+        // Later requests come from the actual Camera Roll surface and retain
+        // the existing picker flow.
         if (permissionNeeds?.photos && !photoPrimerConsumedRef.current) {
           photoPrimerConsumedRef.current = true;
           setPermissionNeeds(needs => needs ? { ...needs, photos: false } : needs);
           void rememberPhotos
-            .then(() => ImagePicker.requestMediaLibraryPermissionsAsync())
+            .then(() => ImagePicker.getMediaLibraryPermissionsAsync())
             .catch(error =>
               console.warn('[PostLoginHomeWebScreen] camera roll permission failed', error));
         } else {
