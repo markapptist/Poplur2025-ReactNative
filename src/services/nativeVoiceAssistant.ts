@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { AppState, Platform, type AppStateStatus } from 'react-native';
+import * as Speech from 'expo-speech';
 import {
   AVAudioSessionCategory,
   AVAudioSessionCategoryOptions,
@@ -11,6 +12,7 @@ export type NativeVoiceCommand = {
   token: string;
   tab?: 'map' | 'feed' | 'post' | 'profile';
   channel?: string;
+  feedback: string;
 };
 
 const WAKE_WINDOW_MS = 6_000;
@@ -61,15 +63,21 @@ function commandFromTranscript(value: string): Omit<NativeVoiceCommand, 'token'>
   const channelNumber = text.match(/\b(10[1-9]|11[01])\b/)?.[1];
   const hasChannelIntent = /\b(channel|feed|tune|watch|go to|open|switch)\b/.test(text);
   if (hasChannelIntent && (channelName || channelNumber)) {
+    const channel = channelName === 'modeling' ? 'modelling' : channelName ?? channelNumber;
     return {
       tab: 'feed',
-      channel: channelName === 'modeling' ? 'modelling' : channelName ?? channelNumber,
+      channel,
+      feedback: `Tuning to ${channel}`,
     };
   }
-  if (/\b(camera|post|create|record)\b/.test(text)) return { tab: 'post' };
-  if (/\b(profile|account)\b/.test(text)) return { tab: 'profile' };
-  if (/\b(map|globe)\b/.test(text)) return { tab: 'map' };
-  if (/\b(feed|channel|tv)\b/.test(text)) return { tab: 'feed' };
+  if (/\b(camera|post|create|record)\b/.test(text)) {
+    return { tab: 'post', feedback: 'Opening camera' };
+  }
+  if (/\b(profile|account)\b/.test(text)) {
+    return { tab: 'profile', feedback: 'Opening profile' };
+  }
+  if (/\b(map|globe)\b/.test(text)) return { tab: 'map', feedback: 'Opening map' };
+  if (/\b(feed|channel|tv)\b/.test(text)) return { tab: 'feed', feedback: 'Opening feed' };
   return null;
 }
 
@@ -87,6 +95,9 @@ export function useNativeVoiceAssistant({
   const desiredListeningRef = useRef(false);
   const recognitionRunningRef = useRef(false);
   const recognitionStartingRef = useRef(false);
+  const speechRunningRef = useRef(false);
+  const speechSequenceRef = useRef(0);
+  const speakFeedbackRef = useRef<(feedback: string) => void>(() => {});
   const restartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const homeMountedRef = useRef(false);
   onCommandRef.current = onCommand;
@@ -113,20 +124,34 @@ export function useNativeVoiceAssistant({
     }
 
     if (!commandText) return;
-    const detail = commandFromTranscript(commandText);
-    if (!detail) return;
+    const detail = commandFromTranscript(commandText) ?? { feedback: 'I did not catch that' };
     awaitingCommandUntilRef.current = 0;
     commandSequenceRef.current += 1;
-    onCommandRef.current({
+    const command = {
       token: `rn-voice-${now}-${commandSequenceRef.current}`,
       ...detail,
-    });
+    };
+    // Dispatch first: the web audio owner mutes Feed/Map before native TTS
+    // enters the device audio session, so there is no audible overlap window.
+    onCommandRef.current(command);
+    speakFeedbackRef.current(command.feedback);
   }, []);
 
   const clearRestartTimer = useCallback(() => {
     if (restartTimerRef.current) clearTimeout(restartTimerRef.current);
     restartTimerRef.current = null;
   }, []);
+
+  const pauseRecognition = useCallback(() => {
+    recognitionRunningRef.current = false;
+    recognitionStartingRef.current = false;
+    clearRestartTimer();
+    try {
+      ExpoSpeechRecognitionModule.abort();
+    } catch {
+      // The recognizer was already inactive.
+    }
+  }, [clearRestartTimer]);
 
   const startRecognition = useCallback(() => {
     if (
@@ -136,6 +161,7 @@ export function useNativeVoiceAssistant({
       || !desiredListeningRef.current
       || recognitionRunningRef.current
       || recognitionStartingRef.current
+      || speechRunningRef.current
       || AppState.currentState !== 'active'
       || !ExpoSpeechRecognitionModule.isRecognitionAvailable()
     ) return;
@@ -166,7 +192,11 @@ export function useNativeVoiceAssistant({
 
   const scheduleRestart = useCallback((delay = RESTART_DELAY_MS) => {
     clearRestartTimer();
-    if (!desiredListeningRef.current || AppState.currentState !== 'active') return;
+    if (
+      !desiredListeningRef.current
+      || speechRunningRef.current
+      || AppState.currentState !== 'active'
+    ) return;
     restartTimerRef.current = setTimeout(() => {
       restartTimerRef.current = null;
       startRecognition();
@@ -187,15 +217,54 @@ export function useNativeVoiceAssistant({
 
   const stopRecognition = useCallback(() => {
     desiredListeningRef.current = false;
-    recognitionRunningRef.current = false;
-    recognitionStartingRef.current = false;
-    clearRestartTimer();
-    try {
-      ExpoSpeechRecognitionModule.abort();
-    } catch {
-      // The recognizer was already inactive.
-    }
-  }, [clearRestartTimer]);
+    pauseRecognition();
+  }, [pauseRecognition]);
+
+  const finishSpeech = useCallback((token: number) => {
+    if (token !== speechSequenceRef.current) return;
+    speechRunningRef.current = false;
+    if (desiredListeningRef.current && AppState.currentState === 'active') scheduleRestart();
+  }, [scheduleRestart]);
+
+  const stopSpeech = useCallback(() => {
+    speechSequenceRef.current += 1;
+    speechRunningRef.current = false;
+    void Speech.stop().catch(() => {});
+  }, []);
+
+  const speakFeedback = useCallback((feedback: string) => {
+    if (!feedback.trim() || Platform.OS === 'web' || AppState.currentState !== 'active') return;
+    const token = ++speechSequenceRef.current;
+    speechRunningRef.current = true;
+    // Continuous recognition must not transcribe the app's own answer. Keep
+    // the user's desired-listening state and resume only after TTS completes.
+    pauseRecognition();
+    void Speech.stop()
+      .catch(() => {})
+      .then(() => {
+        if (
+          token !== speechSequenceRef.current
+          || !homeMountedRef.current
+          || AppState.currentState !== 'active'
+        ) {
+          finishSpeech(token);
+          return;
+        }
+        try {
+          Speech.speak(feedback, {
+            language: 'en-CA',
+            rate: 0.98,
+            pitch: 1.03,
+            onDone: () => finishSpeech(token),
+            onStopped: () => finishSpeech(token),
+            onError: () => finishSpeech(token),
+          });
+        } catch {
+          finishSpeech(token);
+        }
+      });
+  }, [finishSpeech, pauseRecognition]);
+  speakFeedbackRef.current = speakFeedback;
 
   useEffect(() => {
     if (!enabled || Platform.OS === 'web') return;
@@ -203,7 +272,10 @@ export function useNativeVoiceAssistant({
 
     const syncWithAppState = (state: AppStateStatus) => {
       if (state === 'active') void startIfAuthorized();
-      else stopRecognition();
+      else {
+        stopRecognition();
+        stopSpeech();
+      }
     };
     syncWithAppState(AppState.currentState);
     const appStateSubscription = AppState.addEventListener('change', syncWithAppState);
@@ -238,11 +310,14 @@ export function useNativeVoiceAssistant({
       endSubscription.remove();
       appStateSubscription.remove();
       stopRecognition();
+      stopSpeech();
     };
-  }, [enabled, handleTranscript, scheduleRestart, startIfAuthorized, stopRecognition]);
+  }, [enabled, handleTranscript, scheduleRestart, startIfAuthorized, stopRecognition, stopSpeech]);
 
   const requestVoiceAssistant = useCallback(async () => {
     if (!enabled || Platform.OS === 'web') return false;
+
+    stopSpeech();
 
     // Only the explicit HEY POPLUR tile is allowed to open an OS permission
     // sheet. A normal Home mount calls startIfAuthorized(), which is read-only.
@@ -258,7 +333,7 @@ export function useNativeVoiceAssistant({
     desiredListeningRef.current = true;
     startRecognition();
     return true;
-  }, [enabled, startRecognition]);
+  }, [enabled, startRecognition, stopSpeech]);
 
   return { requestVoiceAssistant };
 }
