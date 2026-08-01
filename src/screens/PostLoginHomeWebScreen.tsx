@@ -16,6 +16,10 @@ import {
   markPermissionPrimerHandled,
   type PrimerPermission,
 } from '../services/permissionPrimer';
+import {
+  useNativeVoiceAssistant,
+  type NativeVoiceCommand,
+} from '../services/nativeVoiceAssistant';
 
 // Post-login HOME web embed (RN parity with iOS/Android Phase 3).
 //
@@ -34,7 +38,7 @@ import {
 // homeReady).
 
 // Bump when the staged claymap.zip changes so devices re-extract.
-const BUNDLE_VERSION = '46';
+const BUNDLE_VERSION = '47';
 
 const CLAYMAP_ZIP = require('../assets/claymap/claymap.zip');
 const WEB_HOME_ORIGIN = 'http://127.0.0.1:5173';
@@ -137,6 +141,8 @@ export function PostLoginHomeWebScreen({
   const [profileReady, setProfileReady] = useState(false);
   const [permissionNeeds, setPermissionNeeds] = useState<PermissionNeeds | null>(null);
   const photoPrimerConsumedRef = useRef(false);
+  const homeReadyRef = useRef(false);
+  const pendingNativeVoiceCommandRef = useRef<NativeVoiceCommand | null>(null);
 
   const sendProfileToWeb = async () => {
     try {
@@ -242,6 +248,29 @@ export function PostLoginHomeWebScreen({
       `window.dispatchEvent(new CustomEvent(${name}, { detail: ${payload} })); true;`,
     );
   }, []);
+
+  const deliverNativeVoiceCommand = useCallback((command: NativeVoiceCommand) => {
+    if (!homeReadyRef.current) {
+      pendingNativeVoiceCommandRef.current = command;
+      return;
+    }
+    dispatchToClay('poplur-native-voice-command', command);
+  }, [dispatchToClay]);
+
+  const { requestVoiceAssistant } = useNativeVoiceAssistant({
+    enabled: Platform.OS !== 'web',
+    onCommand: deliverNativeVoiceCommand,
+  });
+
+  const markHomeReady = useCallback(() => {
+    homeReadyRef.current = true;
+    setHomeReady(true);
+    const pending = pendingNativeVoiceCommandRef.current;
+    if (pending) {
+      pendingNativeVoiceCommandRef.current = null;
+      dispatchToClay('poplur-native-voice-command', pending);
+    }
+  }, [dispatchToClay]);
 
   const requestAndPushLocation = useCallback(async () => {
     await markPermissionPrimerHandled('location').catch(error =>
@@ -351,8 +380,14 @@ export function PostLoginHomeWebScreen({
   const handleMessage = (event: WebViewMessageEvent) => {
     try {
       const message = JSON.parse(event.nativeEvent.data) as ClayMessage;
-      if (message.type === 'homeReady' || message.type === 'mapReady') setHomeReady(true);
+      if (message.type === 'homeReady' || message.type === 'mapReady') markHomeReady();
       if (message.type === 'requestProfile') void sendProfileToWeb();
+      if (message.type === 'requestVoiceAssistant') {
+        // This message is emitted only by the visible HEY POPLUR tile. Home
+        // mount itself never requests microphone or speech permission.
+        void requestVoiceAssistant().catch(error =>
+          console.warn('[PostLoginHomeWebScreen] voice assistant request failed', error));
+      }
       if (message.type === 'permissionHandled'
         && (message.permission === 'location' || message.permission === 'photos')) {
         const permission = message.permission;
@@ -425,7 +460,7 @@ export function PostLoginHomeWebScreen({
           src={homeUri}
           title="Poplur post-login"
           allow="geolocation; camera; microphone"
-          onLoad={() => setHomeReady(true)}
+          onLoad={markHomeReady}
           style={webIframeStyle}
         />
       )}
