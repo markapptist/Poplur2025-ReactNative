@@ -38,7 +38,7 @@ import {
 // homeReady).
 
 // Bump when the staged claymap.zip changes so devices re-extract.
-const BUNDLE_VERSION = '50';
+const BUNDLE_VERSION = '51';
 
 const CLAYMAP_ZIP = require('../assets/claymap/claymap.zip');
 const WEB_HOME_ORIGIN = 'http://127.0.0.1:5173';
