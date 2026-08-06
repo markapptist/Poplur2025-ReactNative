@@ -52,6 +52,49 @@ target 'Poplur' do
       :ccache_enabled => podfile_properties['apple.ccacheEnabled'] == 'true',
     )
 
+    # fmt 11.0.2 — the version React Native 0.76 vendors — does not compile under
+    # Xcode 26 / clang 17: FMT_STRING builds a `consteval` basic_format_string and
+    # the newer compiler rejects it as "not a constant expression"
+    # (Pods/fmt/include/fmt/format-inl.h:59, :60, :1387, :1391, :1394).
+    #
+    # This has to PATCH THE HEADER, not define a macro. base.h sets
+    # FMT_USE_CONSTEVAL through an unguarded #if/#elif chain — there is no
+    # `#ifndef` around it — so -DFMT_USE_CONSTEVAL=0 (and -DFMT_CONSTEVAL=) are
+    # both overridden by the header itself. Forcing the flag to 0 selects fmt's
+    # own non-consteval branch, which is exactly what it uses on compilers
+    # without consteval: format strings are checked at runtime instead of at
+    # compile time. No runtime behaviour changes.
+    #
+    # Runs on every `pod install`, so it survives Pods being regenerated.
+    fmt_base = File.join(__dir__, 'Pods', 'fmt', 'include', 'fmt', 'base.h')
+    if File.exist?(fmt_base)
+      src = File.read(fmt_base)
+      marker = '#if FMT_USE_CONSTEVAL'
+      forced = "#undef FMT_USE_CONSTEVAL\n#define FMT_USE_CONSTEVAL 0  // patched: Xcode 26 / clang 17\n#if FMT_USE_CONSTEVAL"
+      unless src.include?('patched: Xcode 26')
+        src = src.sub(marker, forced)
+        # CocoaPods installs vendored sources READ-ONLY, so this must take
+        # write permission first — otherwise File.write raises and the patch
+        # silently never lands (which is exactly what happened first time).
+        mode = File.stat(fmt_base).mode
+        File.chmod(mode | 0o200, fmt_base)
+        File.write(fmt_base, src)
+        File.chmod(mode, fmt_base)
+        Pod::UI.puts '[poplur] patched fmt base.h to disable consteval (Xcode 26 / clang 17)'
+      end
+    end
+
+    # RCT-Folly requires C++17 (static_assert FOLLY_CPLUSPLUS >= 201703L) but some
+    # pod targets were compiling at C++14 under Xcode 26, so React-jsi failed on
+    # `'201402L >= 201703L'`. React Native 0.76 expects C++20 throughout; pin it
+    # so every pod agrees rather than inheriting a stale per-target default.
+    installer.pods_project.targets.each do |t|
+      t.build_configurations.each do |cfg|
+        std = cfg.build_settings['CLANG_CXX_LANGUAGE_STANDARD']
+        cfg.build_settings['CLANG_CXX_LANGUAGE_STANDARD'] = 'c++20' if std.nil? || std.to_s.include?('14')
+      end
+    end
+
     # This is necessary for Xcode 14, because it signs resource bundles by default
     # when building for devices.
     installer.target_installation_results.pod_target_installation_results
