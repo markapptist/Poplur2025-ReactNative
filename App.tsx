@@ -66,7 +66,30 @@ export default function App() {
     return () => clearTimeout(timer);
   }, []);
 
+  // Dev-only login bypass: `?nologin=1` on the web build drops you straight
+  // into Home. Reviewing the post-login surface in a browser otherwise means
+  // holding real credentials, which is a silly requirement for looking at a
+  // layout — and the screen never reads the user object anyway, it is gated
+  // purely on it being non-null.
+  //
+  // Fenced three ways so it cannot reach a shipped app: __DEV__ only, web
+  // only, and opt-in per URL. It is not a session — nothing is persisted and
+  // no Firebase call is made, so a reload without the flag is signed out again.
+  const devBypassLogin =
+    __DEV__ &&
+    typeof window !== 'undefined' &&
+    new URLSearchParams(window.location.search).get('nologin') === '1';
+
   useEffect(() => {
+    if (!devBypassLogin) return;
+    markScreenNavigation('PostLoginHomeWebScreen');
+    setUser({ uid: 'dev-bypass', isAnonymous: true } as unknown as User);
+  }, [devBypassLogin]);
+
+  useEffect(() => {
+    // The bypass owns the auth state; without this the 4 s logged-out fallback
+    // below would immediately overwrite the stub and bounce back to pre-login.
+    if (devBypassLogin) return;
     // Fall back to logged-out after 4 s so a slow/offline Firebase never
     // leaves the app pinned on the loading screen.
     const timeout = setTimeout(() => {
