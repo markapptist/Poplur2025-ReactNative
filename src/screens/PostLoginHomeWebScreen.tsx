@@ -39,7 +39,7 @@ import {
 // homeReady).
 
 // Bump when the staged claymap.zip changes so devices re-extract.
-const BUNDLE_VERSION = '66';
+const BUNDLE_VERSION = '67';
 
 const CLAYMAP_ZIP = require('../assets/claymap/claymap.zip');
 const WEB_HOME_ORIGIN = 'http://127.0.0.1:5173';
@@ -88,6 +88,7 @@ type ClayMessage = {
   permission?: PrimerPermission;
   granted?: boolean;
   url?: string;
+  visible?: boolean;
 };
 
 function validatedHttpsUrl(value: unknown): string | null {
@@ -106,6 +107,8 @@ type MediaAsset = {
   type?: string | null;
   mimeType?: string | null;
   duration?: number | null;
+  width?: number | null;
+  height?: number | null;
 };
 
 function assetKind(asset: MediaAsset): 'photo' | 'video' {
@@ -157,6 +160,7 @@ export function PostLoginHomeWebScreen({
   const homeReadyRef = useRef(false);
   const pendingNativeVoiceCommandRef = useRef<NativeVoiceCommand | null>(null);
   const inAppBrowserOpenRef = useRef(false);
+  const cameraLiveVisibleRef = useRef(false);
 
   const sendProfileToWeb = async () => {
     try {
@@ -335,6 +339,8 @@ export function PostLoginHomeWebScreen({
       kind,
       src: `${origin}/captures/${filename}`,
       length: kind === 'video' ? clipLength(asset.duration) : undefined,
+      width: kind === 'photo' && asset.width && asset.width > 0 ? asset.width : undefined,
+      height: kind === 'photo' && asset.height && asset.height > 0 ? asset.height : undefined,
     };
   }, [origin]);
 
@@ -351,9 +357,15 @@ export function PostLoginHomeWebScreen({
         : ImagePicker.MediaTypeOptions.All;
     const options: ImagePicker.ImagePickerOptions = {
       mediaTypes,
-      quality: 0.9,
+      // Library picks are already encoded originals. Maximum quality keeps
+      // their full pixel dimensions (4K when the source has them) and never
+      // invents pixels for a smaller image. Camera capture keeps its existing
+      // compression because that is a newly-created asset, not Camera Roll.
+      quality: source === 'library' ? 1 : 0.9,
       videoMaxDuration: 60,
       allowsEditing: false,
+      allowsMultipleSelection: false,
+      selectionLimit: 1,
     };
     const result = source === 'camera'
       ? await ImagePicker.launchCameraAsync(options)
@@ -442,10 +454,15 @@ export function PostLoginHomeWebScreen({
       if (message.type === 'requestCameraPermission') {
         void ImagePicker.requestCameraPermissionsAsync();
       }
-      if (message.type === 'cameraShutter') {
+      if (message.type === 'cameraLiveVisibilityChanged') {
+        cameraLiveVisibleRef.current = message.visible === true;
+      }
+      if (message.type === 'cameraShutter' && cameraLiveVisibleRef.current) {
         void pickCapture('camera', 'photo').catch(error => console.warn('[PostLoginHomeWebScreen] camera capture failed', error));
       }
-      if (message.type === 'cameraControl' && message.control === 'record') {
+      if (message.type === 'cameraControl'
+        && message.control === 'record'
+        && cameraLiveVisibleRef.current) {
         void pickCapture('camera', 'video').catch(error => console.warn('[PostLoginHomeWebScreen] video capture failed', error));
       }
       if (message.type === 'requestCameraRoll') {
