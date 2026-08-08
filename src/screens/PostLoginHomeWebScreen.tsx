@@ -4,6 +4,7 @@ import { Asset } from 'expo-asset';
 import * as FileSystem from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
+import * as WebBrowser from 'expo-web-browser';
 import { StatusBar } from 'expo-status-bar';
 import Server from '@dr.pogodin/react-native-static-server';
 import { unzip } from 'react-native-zip-archive';
@@ -38,7 +39,7 @@ import {
 // homeReady).
 
 // Bump when the staged claymap.zip changes so devices re-extract.
-const BUNDLE_VERSION = '65';
+const BUNDLE_VERSION = '66';
 
 const CLAYMAP_ZIP = require('../assets/claymap/claymap.zip');
 const WEB_HOME_ORIGIN = 'http://127.0.0.1:5173';
@@ -86,7 +87,19 @@ type ClayMessage = {
   scope?: 'once' | 'whileUsing';
   permission?: PrimerPermission;
   granted?: boolean;
+  url?: string;
 };
+
+function validatedHttpsUrl(value: unknown): string | null {
+  if (typeof value !== 'string' || value.length > 4096) return null;
+  try {
+    const url = new URL(value);
+    if (url.protocol !== 'https:' || !url.hostname || url.username || url.password) return null;
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
 
 type MediaAsset = {
   uri: string;
@@ -143,6 +156,7 @@ export function PostLoginHomeWebScreen({
   const photoPrimerConsumedRef = useRef(false);
   const homeReadyRef = useRef(false);
   const pendingNativeVoiceCommandRef = useRef<NativeVoiceCommand | null>(null);
+  const inAppBrowserOpenRef = useRef(false);
 
   const sendProfileToWeb = async () => {
     try {
@@ -377,11 +391,33 @@ export function PostLoginHomeWebScreen({
     }
   }, [dispatchToClay]);
 
+  const openInAppBrowser = useCallback(async (value: unknown) => {
+    const url = validatedHttpsUrl(value);
+    if (!url) {
+      console.warn('[PostLoginHomeWebScreen] blocked invalid in-app browser URL');
+      return;
+    }
+    if (inAppBrowserOpenRef.current) return;
+
+    inAppBrowserOpenRef.current = true;
+    try {
+      // Expo WebBrowser uses SFSafariViewController on iOS and a Custom Tab on
+      // Android, keeping untrusted shopping pages outside the privileged clay
+      // WebView while still presenting them inside Poplur.
+      await WebBrowser.openBrowserAsync(url);
+    } catch (error) {
+      console.warn('[PostLoginHomeWebScreen] in-app browser failed', error);
+    } finally {
+      inAppBrowserOpenRef.current = false;
+    }
+  }, []);
+
   const handleMessage = (event: WebViewMessageEvent) => {
     try {
       const message = JSON.parse(event.nativeEvent.data) as ClayMessage;
       if (message.type === 'homeReady' || message.type === 'mapReady') markHomeReady();
       if (message.type === 'requestProfile') void sendProfileToWeb();
+      if (message.type === 'openInAppBrowser') void openInAppBrowser(message.url);
       if (message.type === 'requestVoiceAssistant') {
         // This message is emitted only by the visible HEY POPLUR tile. Home
         // mount itself never requests microphone or speech permission.

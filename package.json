@@ -35,6 +35,7 @@
     "expo-speech": "~13.0.1",
     "expo-speech-recognition": "1.1.1",
     "expo-status-bar": "~2.0.1",
+    "expo-web-browser": "~14.0.2",
     "firebase": "^10.14.1",
     "react": "18.3.1",
     "react-dom": "18.3.1",

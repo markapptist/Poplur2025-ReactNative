@@ -1148,3 +1148,24 @@ index 62838b3..583298f 100644
        )
        moduleInfos
      }
+diff --git a/node_modules/@dr.pogodin/react-native-static-server/ReactNativeStaticServer.podspec b/node_modules/@dr.pogodin/react-native-static-server/ReactNativeStaticServer.podspec
+index b286275..5cbb105 100644
+--- a/node_modules/@dr.pogodin/react-native-static-server/ReactNativeStaticServer.podspec
++++ b/node_modules/@dr.pogodin/react-native-static-server/ReactNativeStaticServer.podspec
+@@ -66,7 +66,15 @@ Pod::Spec.new do |s|
+ 
+       if [[ ${PLATFORM_FAMILY_NAME} == "iOS" ]]
+       then
+-        EXTRA_CONFIG_ARGS="-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64 -DCMAKE_OSX_DEPLOYMENT_TARGET=${IPHONEOS_DEPLOYMENT_TARGET} -DCMAKE_SYSTEM_NAME=iOS -GXcode"
++        # -DHAVE_PIPE2=0: Darwin has no pipe2(), but cmake's
++        # check_function_exists finds the SYMBOL in libSystem while no iOS
++        # header declares it, so HAVE_PIPE2 came back true and lighttpd
++        # compiled a call to an undeclared function. That was a warning until
++        # Xcode 16; clang now makes implicit declarations a hard error (C99),
++        # so the pod stopped building entirely. Seeding the cache variable
++        # makes check_function_exists skip its (wrong) probe and lighttpd take
++        # its own pipe() + FD_CLOEXEC fallback, which is the correct path here.
++        EXTRA_CONFIG_ARGS="-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64 -DCMAKE_OSX_DEPLOYMENT_TARGET=${IPHONEOS_DEPLOYMENT_TARGET} -DCMAKE_SYSTEM_NAME=iOS -GXcode -DHAVE_PIPE2=0"
+         BUILD_OUTPUT_FOLDER_LIGHTTPD="/${LIGHTTPD_CONFIG}${EFFECTIVE_PLATFORM_NAME}"
+         BUILD_OUTPUT_FOLDER_PCRE2="/Release${EFFECTIVE_PLATFORM_NAME}"
+       else
