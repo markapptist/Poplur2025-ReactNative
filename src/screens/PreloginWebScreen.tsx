@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Platform, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, AppState, Platform, StyleSheet, View } from 'react-native';
 import { Asset } from 'expo-asset';
 import * as FileSystem from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
@@ -174,6 +174,28 @@ async function preparePage(page: Page): Promise<string> {
   return html;
 }
 
+// Minimizing the app must silence the pre-login radio bed. The bundled pages
+// carry no `visibilitychange` handler — they are GENERATED from the protected
+// Good Copy sources — and neither iOS nor Android pauses WebView media on its
+// own, so the host owns the pause. Mirrors PreloginWebView.swift (iOS) and
+// PreloginWebActivity.kt (Android).
+//
+// Only what THIS code paused is resumed, so a bed the person muted or paused in
+// the web UI stays that way when they come back.
+const SUSPEND_MEDIA_JS = `(function(){
+  window.__poplurSuspended = [];
+  document.querySelectorAll('audio,video').forEach(function (m) {
+    if (!m.paused) { window.__poplurSuspended.push(m); m.pause(); }
+  });
+})(); true;`;
+
+const RESUME_MEDIA_JS = `(function(){
+  (window.__poplurSuspended || []).forEach(function (m) {
+    var r = m.play(); if (r && r.catch) r.catch(function(){});
+  });
+  window.__poplurSuspended = [];
+})(); true;`;
+
 export function PreloginWebScreen({ splashOnly = false, onPermissionSequenceHandled }: {
   splashOnly?: boolean;
   onPermissionSequenceHandled?: () => void;
@@ -214,6 +236,15 @@ export function PreloginWebScreen({ splashOnly = false, onPermissionSequenceHand
       if (handoff) clearTimeout(handoff);
     };
   }, [splashOnly]);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', state => {
+      webViewRef.current?.injectJavaScript(
+        state === 'active' ? RESUME_MEDIA_JS : SUSPEND_MEDIA_JS
+      );
+    });
+    return () => subscription.remove();
+  }, []);
 
   const handleMessage = async (event: WebViewMessageEvent) => {
     let message: { action?: string; payload?: string };
