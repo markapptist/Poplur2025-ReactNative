@@ -1979,7 +1979,7 @@ if (POPLUR_WEBGL_OK) document.querySelectorAll("canvas[data-account-model]").for
     function store (k, v) { try { v === null ? localStorage.removeItem(k) : localStorage.setItem(k, v) } catch (e) {} }
 
     if (/[?&]colorlab=1/.test(location.search)) store(KEY, '1')
-    if (/[?&]colorlab=0/.test(location.search)) store(KEY, null)
+    if (/[?&]colorlab=0/.test(location.search)) store(KEY, '0')
 
     function hslToHex (h, s, l) {
       s /= 100; l /= 100
@@ -2028,7 +2028,9 @@ if (POPLUR_WEBGL_OK) document.querySelectorAll("canvas[data-account-model]").for
 
     function enable (on) {
       document.documentElement.classList.toggle('poplur-colorlab', !!on)
-      store(KEY, on ? '1' : null)
+      // '0' rather than removing the key: absence now means "on" (the default),
+      // so an opt-out has to be recorded explicitly or it would not survive.
+      store(KEY, on ? '1' : '0')
       if (!on) {
         store(PICK, null)
         document.documentElement.style.removeProperty('background')
@@ -2043,7 +2045,7 @@ if (POPLUR_WEBGL_OK) document.querySelectorAll("canvas[data-account-model]").for
     window.__poplurColorRoll = roll
 
     function boot () {
-      if (stored(KEY) !== '1') return
+      if (stored(KEY) === '0') return
       enable(true)
       // Re-apply across the splash -> welcome handoff so a colour you are
       // judging does not reset itself halfway through the flow.
