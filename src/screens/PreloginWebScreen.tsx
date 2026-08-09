@@ -187,6 +187,9 @@ const SUSPEND_MEDIA_JS = `(function(){
   document.querySelectorAll('audio,video').forEach(function (m) {
     if (!m.paused) { window.__poplurSuspended.push(m); m.pause(); }
   });
+  // The AI host is not an <audio> tag — welcome.html's speakAI() uses the Web
+  // Speech API, so pausing media elements alone leaves the voice talking.
+  try { window.speechSynthesis && window.speechSynthesis.cancel(); } catch (e) {}
 })(); true;`;
 
 const RESUME_MEDIA_JS = `(function(){
