@@ -182,6 +182,11 @@ async function preparePage(page: Page): Promise<string> {
 //
 // Only what THIS code paused is resumed, so a bed the person muted or paused in
 // the web UI stays that way when they come back.
+// The same coordinates the approved Welcome source hardcodes, used whenever the
+// person has not already granted location.
+const FALLBACK_LAT = 43.6532;
+const FALLBACK_LON = -79.3832;
+
 const SUSPEND_MEDIA_JS = `(function(){
   window.__poplurSuspended = [];
   document.querySelectorAll('audio,video').forEach(function (m) {
@@ -338,6 +343,54 @@ export function PreloginWebScreen({ splashOnly = false, onPermissionSequenceHand
         console.warn('[PreloginWebScreen] permission request failed', error);
       }
     }
+
+    if (action === 'radioStations') {
+      await fetchRadioStations(payload.callbackId ?? '');
+    }
+  };
+
+  // Live radio, the way the map already tunes it. The page's own station lookup
+  // is a raw fetch that the offline bundle strips, so the call is made here.
+  //
+  // No permission is requested: pre-login defers every OS prompt until the
+  // feature that needs it is used, so this uses a location the person has
+  // ALREADY granted and otherwise falls back to the approved default coords.
+  const fetchRadioStations = async (callbackId: string) => {
+    let lat = FALLBACK_LAT;
+    let lon = FALLBACK_LON;
+    try {
+      const { status } = await Location.getForegroundPermissionsAsync();
+      if (status === 'granted') {
+        const fix = await Location.getLastKnownPositionAsync();
+        if (fix) { lat = fix.coords.latitude; lon = fix.coords.longitude; }
+      }
+    } catch { /* fall back to the approved coordinates */ }
+
+    let list: unknown = [];
+    try {
+      // A launch screen must never wait on a third party. The web side gives up
+      // after 6s; this gives up sooner so an empty list is a decision rather
+      // than two timeouts racing each other.
+      const abort = new AbortController();
+      const timer = setTimeout(() => abort.abort(), 4000);
+      const response = await fetch(
+        'https://de1.api.radio-browser.info/json/stations/search'
+        + `?geo_lat=${lat}&geo_long=${lon}&geo_distance=90000`
+        + '&hidebroken=true&order=clickcount&reverse=true&limit=16',
+        { signal: abort.signal }
+      );
+      clearTimeout(timer);
+      list = await response.json();
+    } catch { /* an empty list just means pre-login stays silent */ }
+
+    // Re-serialized rather than forwarded raw: this is third-party text landing
+    // in an expression position, and round-tripping it through JSON is what
+    // keeps it a value rather than a script.
+    const safeId = callbackId.replace(/[^a-zA-Z0-9]/g, '');
+    const json = JSON.stringify(Array.isArray(list) ? list : []);
+    webViewRef.current?.injectJavaScript(
+      `window.__poplurStationsResult && window.__poplurStationsResult('${safeId}', ${json}); true;`
+    );
   };
 
   const postAuthResult = (ok: boolean, error = '') => {
