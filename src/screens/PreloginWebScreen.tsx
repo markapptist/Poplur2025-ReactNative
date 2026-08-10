@@ -376,7 +376,10 @@ export function PreloginWebScreen({ splashOnly = false, onPermissionSequenceHand
       const response = await fetch(
         'https://de1.api.radio-browser.info/json/stations/search'
         + `?geo_lat=${lat}&geo_long=${lon}&geo_distance=90000`
-        + '&hidebroken=true&order=clickcount&reverse=true&limit=16',
+        // bitrateMin: nearest-by-popularity happily returns 32kbps mono streams,
+        // and a heavily compressed stream behind the music is indistinguishable
+        // from a fault in the app.
+        + '&hidebroken=true&bitrateMin=96&order=clickcount&reverse=true&limit=16',
         { signal: abort.signal }
       );
       clearTimeout(timer);
