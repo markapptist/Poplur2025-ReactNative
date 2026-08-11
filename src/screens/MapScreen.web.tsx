@@ -44,7 +44,8 @@ export function MapScreen() {
         uri: asset.uri,
         mediaType: asset.type === 'video' ? 'video' : 'photo',
         latitude: selected.latitude,
-        longitude: selected.longitude
+        longitude: selected.longitude,
+        sizeBytes: asset.fileSize
       });
       await load();
       Alert.alert('Posted', 'Your media was posted to the map.');

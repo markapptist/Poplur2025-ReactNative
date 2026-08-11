@@ -6,6 +6,20 @@ import { Ionicons } from '@expo/vector-icons';
 import { uploadPostMedia } from '../services/posts';
 import { usePoplurHeavyRenderer, usePoplurPerformance } from '../performance/PoplurPerformance';
 import { PoplurPerformanceMode } from '../performance/PoplurPerformanceManager';
+import {
+  cleanupExpoCameraTempFiles,
+  deleteExpoCameraTempFile,
+  MAX_CAMERA_TEMP_AGE_MS,
+  MAX_VIDEO_UPLOAD_BYTES,
+  verifiedMediaSize,
+} from '../services/mediaResources';
+
+type CameraPreview = {
+  uri: string;
+  type: 'photo' | 'video';
+  sizeBytes: number;
+  ownedTempFile: boolean;
+};
 
 export function CameraScreen() {
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
@@ -14,16 +28,43 @@ export function CameraScreen() {
   const [facing, setFacing] = useState<CameraType>('back');
   const [torch, setTorch] = useState(false);
   const [recording, setRecording] = useState(false);
-  const [previewUri, setPreviewUri] = useState<string | null>(null);
-  const [previewType, setPreviewType] = useState<'photo' | 'video'>('photo');
+  const [preview, setPreview] = useState<CameraPreview | null>(null);
+  const [cameraStorageReady, setCameraStorageReady] = useState(false);
+  const [cameraStorageError, setCameraStorageError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const captureBusyRef = useRef(false);
   const performance = usePoplurPerformance();
   const cameraAvailable = cameraPermission?.granted === true && micPermission?.granted === true;
   const ownsCamera = usePoplurHeavyRenderer(
     'camera-capture-session',
-    cameraAvailable,
+    cameraAvailable && cameraStorageReady,
     { priority: 110, decorative: false },
   );
+
+  React.useEffect(() => {
+    let active = true;
+    void cleanupExpoCameraTempFiles()
+      .then(() => {
+        if (active) setCameraStorageReady(true);
+      })
+      .catch(error => {
+        if (!active) return;
+        setCameraStorageError(error instanceof Error ? error.message : 'Camera storage cleanup failed.');
+      });
+    return () => { active = false; };
+  }, []);
+
+  React.useEffect(() => {
+    if (!preview?.ownedTempFile) return;
+    const uri = preview.uri;
+    const expiration = setTimeout(() => {
+      setPreview(current => current?.uri === uri ? null : current);
+    }, MAX_CAMERA_TEMP_AGE_MS);
+    return () => {
+      clearTimeout(expiration);
+      void deleteExpoCameraTempFile(uri);
+    };
+  }, [preview]);
 
   React.useEffect(() => {
     if (ownsCamera) return;
@@ -36,32 +77,89 @@ export function CameraScreen() {
     return <View style={styles.permission}><Text style={styles.title}>Camera access needed</Text><Text style={styles.copy}>Poplur uses the camera like the iOS CameraKit screen.</Text><Pressable style={styles.button} onPress={() => { requestCameraPermission(); requestMicPermission(); }}><Text style={styles.buttonText}>Grant permissions</Text></Pressable></View>;
   }
 
+  if (!cameraStorageReady) {
+    return <View style={styles.permission}><Text style={styles.title}>Camera storage</Text><Text style={styles.copy}>{cameraStorageError ?? 'Preparing a bounded capture workspace…'}</Text>{cameraStorageError && <Pressable style={styles.button} onPress={() => {
+      setCameraStorageError(null);
+      void cleanupExpoCameraTempFiles().then(() => setCameraStorageReady(true)).catch(error => setCameraStorageError(error instanceof Error ? error.message : 'Camera storage cleanup failed.'));
+    }}><Text style={styles.buttonText}>Try again</Text></Pressable>}</View>;
+  }
+
+  async function showPreview(
+    uri: string,
+    type: 'photo' | 'video',
+    ownedTempFile: boolean,
+    declaredBytes?: number,
+  ) {
+    try {
+      const sizeBytes = await verifiedMediaSize(uri, type, declaredBytes);
+      if (ownedTempFile) await cleanupExpoCameraTempFiles([uri]);
+      setPreview({ uri, type, sizeBytes, ownedTempFile });
+    } catch (error) {
+      if (ownedTempFile) await deleteExpoCameraTempFile(uri).catch(() => {});
+      throw error;
+    }
+  }
+
   async function takePhoto() {
-    if (!ownsCamera) return;
-    const photo = await cameraRef.current?.takePictureAsync({ quality: 0.86 });
-    if (photo?.uri) { setPreviewUri(photo.uri); setPreviewType('photo'); }
+    if (!ownsCamera || captureBusyRef.current) return;
+    captureBusyRef.current = true;
+    try {
+      const photo = await cameraRef.current?.takePictureAsync({ quality: 0.86 });
+      if (photo?.uri) await showPreview(photo.uri, 'photo', true);
+    } catch (error: any) {
+      Alert.alert('Capture failed', error.message ?? 'The photo could not be captured.');
+    } finally {
+      captureBusyRef.current = false;
+    }
   }
 
   async function toggleRecord() {
     if (!ownsCamera && !recording) return;
     if (recording) { cameraRef.current?.stopRecording(); setRecording(false); return; }
+    if (captureBusyRef.current) return;
+    captureBusyRef.current = true;
     setRecording(true);
+    let recordedUri: string | null = null;
     try {
-      const video = await cameraRef.current?.recordAsync({ maxDuration: 10 });
-      if (video?.uri) { setPreviewUri(video.uri); setPreviewType('video'); }
+      const video = await cameraRef.current?.recordAsync({
+        maxDuration: 10,
+        maxFileSize: MAX_VIDEO_UPLOAD_BYTES,
+      });
+      if (video?.uri) {
+        await showPreview(video.uri, 'video', true);
+        recordedUri = video.uri;
+      }
     } catch (e: any) { Alert.alert('Recording failed', e.message); }
-    finally { setRecording(false); }
+    finally {
+      captureBusyRef.current = false;
+      setRecording(false);
+      const preserved = recordedUri
+        ? [recordedUri]
+        : preview?.ownedTempFile ? [preview.uri] : [];
+      void cleanupExpoCameraTempFiles(preserved).catch(() => {});
+    }
   }
 
   async function pickLibrary() {
-    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.All, quality: 0.85 });
-    if (!result.canceled) { setPreviewUri(result.assets[0].uri); setPreviewType(result.assets[0].type === 'video' ? 'video' : 'photo'); }
+    if (captureBusyRef.current) return;
+    captureBusyRef.current = true;
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.All, quality: 0.85 });
+      if (!result.canceled) {
+        const asset = result.assets[0];
+        await showPreview(asset.uri, asset.type === 'video' ? 'video' : 'photo', false, asset.fileSize);
+      }
+    } catch (error: any) {
+      Alert.alert('Selection failed', error.message ?? 'The selected media could not be prepared.');
+    } finally {
+      captureBusyRef.current = false;
+    }
   }
 
   async function postToProfile() {
-    if (!previewUri) return;
+    if (!preview) return;
     setUploading(true);
-    try { await uploadPostMedia({ uri: previewUri, mediaType: previewType === 'video' ? 'video_profile' : 'photo_profile' }); setPreviewUri(null); Alert.alert('Posted', 'Saved to your profile feed.'); }
+    try { await uploadPostMedia({ uri: preview.uri, mediaType: preview.type === 'video' ? 'video_profile' : 'photo_profile', sizeBytes: preview.sizeBytes }); setPreview(null); Alert.alert('Posted', 'Saved to your profile feed.'); }
     catch (e: any) { Alert.alert('Upload failed', e.message); }
     finally { setUploading(false); }
   }
@@ -79,7 +177,7 @@ export function CameraScreen() {
       />
     ) : <View style={styles.fill} />}
     <View style={styles.scanFrame}><Text style={styles.scanText}>Scanning…</Text></View>
-    {previewUri && <View style={styles.preview}><Image source={{ uri: previewUri }} style={styles.previewImage} /><Pressable style={styles.previewClose} onPress={() => setPreviewUri(null)}><Ionicons name="close" color="white" size={22} /></Pressable></View>}
+    {preview && <View style={styles.preview}><Image source={{ uri: preview.uri }} style={styles.previewImage} /><Pressable style={styles.previewClose} onPress={() => setPreview(null)}><Ionicons name="close" color="white" size={22} /></Pressable></View>}
     <View style={styles.topBar}>
       <Pressable onPress={() => setTorch(t => !t)} style={styles.round}><Ionicons name={torch ? 'flash' : 'flash-off'} color="white" size={24} /></Pressable>
       <Pressable onPress={() => setFacing(f => f === 'back' ? 'front' : 'back')} style={styles.round}><Ionicons name="camera-reverse" color="white" size={24} /></Pressable>
@@ -87,7 +185,7 @@ export function CameraScreen() {
     <View style={styles.controls}>
       <Pressable style={styles.smallRound} onPress={pickLibrary}><Ionicons name="images" color="white" size={28} /></Pressable>
       <Pressable style={[styles.shutter, recording && styles.recording]} onPress={takePhoto} onLongPress={toggleRecord}><View style={styles.innerShutter} /></Pressable>
-      <Pressable style={styles.smallRound} onPress={previewUri ? postToProfile : toggleRecord}><Ionicons name={previewUri ? 'paper-plane' : recording ? 'stop' : 'videocam'} color="white" size={28} /></Pressable>
+      <Pressable style={styles.smallRound} onPress={preview ? postToProfile : toggleRecord}><Ionicons name={preview ? 'paper-plane' : recording ? 'stop' : 'videocam'} color="white" size={28} /></Pressable>
     </View>
     {uploading && <Text style={styles.uploading}>Uploading…</Text>}
   </View>;

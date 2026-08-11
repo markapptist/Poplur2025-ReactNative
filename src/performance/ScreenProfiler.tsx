@@ -79,30 +79,45 @@ function startMonitors() {
   monitorsStarted = true;
 
   let frameHandle: number | null = null;
+  let frameTimer: ReturnType<typeof setTimeout> | null = null;
   let lastFrame = now();
   let monitoringFrames = false;
+  const scheduleFrame = () => {
+    if (!monitoringFrames || frameHandle !== null || frameTimer !== null) return;
+    const targetFPS = poplurPerformanceManager.getSnapshot().targetFPS;
+    frameTimer = setTimeout(() => {
+      frameTimer = null;
+      if (monitoringFrames) frameHandle = requestAnimationFrame(onFrame);
+    }, Math.max(1, Math.floor(1000 / targetFPS)));
+  };
   const onFrame = (timestamp: number) => {
     if (!monitoringFrames) return;
+    frameHandle = null;
     const duration = timestamp - lastFrame;
     lastFrame = timestamp;
-    if (duration > 32) {
+    const targetFrameMs = 1000 / poplurPerformanceManager.getSnapshot().targetFPS;
+    if (duration > Math.max(32, targetFrameMs * 1.5)) {
       slowFrames += 1;
       maxFrameMs = Math.max(maxFrameMs, duration);
     }
-    frameHandle = requestAnimationFrame(onFrame);
+    scheduleFrame();
   };
 
   const startFrames = () => {
     if (monitoringFrames || typeof requestAnimationFrame !== 'function') return;
     monitoringFrames = true;
     lastFrame = now();
-    frameHandle = requestAnimationFrame(onFrame);
+    scheduleFrame();
   };
   const stopFrames = () => {
     monitoringFrames = false;
     if (frameHandle !== null && typeof cancelAnimationFrame === 'function') {
       cancelAnimationFrame(frameHandle);
       frameHandle = null;
+    }
+    if (frameTimer !== null) {
+      clearTimeout(frameTimer);
+      frameTimer = null;
     }
   };
   if (AppState.currentState === 'active') startFrames();

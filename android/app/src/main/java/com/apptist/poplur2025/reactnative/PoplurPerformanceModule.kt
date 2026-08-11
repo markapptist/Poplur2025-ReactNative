@@ -10,7 +10,7 @@ import com.facebook.react.modules.core.DeviceEventManagerModule
 class PoplurPerformanceModule(
   private val reactContext: ReactApplicationContext,
 ) : ReactContextBaseJavaModule(reactContext), PoplurPerformanceManager.Observer {
-  private var listenerCount = 0
+  @Volatile private var listenerCount = 0
 
   override fun getName(): String = "PoplurPerformanceNative"
 

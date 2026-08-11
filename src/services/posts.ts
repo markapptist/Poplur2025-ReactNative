@@ -2,6 +2,8 @@ import { addDoc, collection, doc, getDocs, increment, limit, orderBy, query, ser
 import { getDownloadURL, ref, uploadBytesResumable } from 'firebase/storage';
 import { auth, db, storage } from './firebase';
 import type { Post } from '../types/models';
+import { poplurAssetCache } from '../performance/PoplurAssetCache';
+import { verifiedMediaSize } from './mediaResources';
 
 const postsCollection = collection(db, 'posts');
 
@@ -32,23 +34,78 @@ export async function uploadPostMedia(params: {
   filterId?: string;
   usedAI?: boolean;
   radiusMeters?: number;
+  sizeBytes?: number;
   onProgress?: (progress: number) => void;
 }) {
   const user = auth.currentUser;
   if (!user) throw new Error('You must be signed in before posting.');
 
-  const response = await fetch(params.uri);
-  const blob = await response.blob();
-  const extension = params.mediaType.includes('video') ? 'mp4' : 'jpg';
-  const storagePath = `posts/${user.uid}/${Date.now()}.${extension}`;
-  const storageRef = ref(storage, storagePath);
-  const task = uploadBytesResumable(storageRef, blob);
-
-  const mediaURL = await new Promise<string>((resolve, reject) => {
-    task.on('state_changed', snapshot => {
-      params.onProgress?.(snapshot.bytesTransferred / Math.max(snapshot.totalBytes, 1));
-    }, reject, async () => resolve(await getDownloadURL(task.snapshot.ref)));
+  const isVideo = params.mediaType.includes('video');
+  const encodedBytes = await verifiedMediaSize(
+    params.uri,
+    isVideo ? 'video' : 'photo',
+    params.sizeBytes,
+  );
+  const uploadCacheKey = `temporary:post-upload:${Date.now()}:${Math.random().toString(36).slice(2)}`;
+  let blob: Blob | null = null;
+  let task: ReturnType<typeof uploadBytesResumable> | null = null;
+  let revoked = false;
+  const closeBlob = () => {
+    const closable = blob as (Blob & { close?: () => void }) | null;
+    closable?.close?.();
+    blob = null;
+  };
+  const admission = poplurAssetCache.admit({
+    key: uploadCacheKey,
+    kind: 'temporary',
+    value: params.uri,
+    estimatedBytes: encodedBytes,
+    dispose: () => {
+      revoked = true;
+      task?.cancel();
+      closeBlob();
+    },
   });
+  if (!admission.admitted) {
+    throw new Error(`This media exceeds Poplur's active upload budget (${admission.reason}).`);
+  }
+  const lease = poplurAssetCache.retain<string>(uploadCacheKey);
+  if (!lease) {
+    poplurAssetCache.delete(uploadCacheKey, true);
+    throw new Error('Poplur could not reserve a bounded upload buffer.');
+  }
+
+  let mediaURL: string;
+  try {
+    const response = await fetch(params.uri);
+    if (!response.ok && response.status !== 0) {
+      throw new Error(`The selected media could not be read (${response.status}).`);
+    }
+    if (revoked) throw new Error('The upload was stopped to release resources.');
+    blob = await response.blob();
+    if (blob.size <= 0 || blob.size > encodedBytes) {
+      throw new Error('The selected media size changed while Poplur was preparing it.');
+    }
+    if (revoked) throw new Error('The upload was stopped to release resources.');
+
+    const extension = isVideo ? 'mp4' : 'jpg';
+    const storagePath = `posts/${user.uid}/${Date.now()}.${extension}`;
+    const storageRef = ref(storage, storagePath);
+    task = uploadBytesResumable(storageRef, blob);
+    mediaURL = await new Promise<string>((resolve, reject) => {
+      task!.on('state_changed', snapshot => {
+        params.onProgress?.(snapshot.bytesTransferred / Math.max(snapshot.totalBytes, 1));
+      }, reject, () => {
+        void getDownloadURL(task!.snapshot.ref).then(resolve, reject);
+      });
+    });
+  } finally {
+    lease.release();
+    poplurAssetCache.delete(uploadCacheKey, true);
+    // The cache may have force-evicted the lease before blob() resolved. Close
+    // again here so that late materialization cannot wait for GC to release it.
+    closeBlob();
+  }
 
   const data: Record<string, unknown> = {
     userID: user.uid,

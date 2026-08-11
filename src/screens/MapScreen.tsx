@@ -41,6 +41,7 @@ export function MapScreen() {
   const [currentLocation, setCurrentLocation] = useState<LatLng | null>(null);
   const [uploading, setUploading] = useState(false);
   const [mapReady, setMapReady] = useState(false);
+  const [mapReadyGeneration, setMapReadyGeneration] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [mapMode, setMapMode] = useState<MapMode>('3d');
   const performance = usePoplurPerformance();
@@ -144,7 +145,20 @@ export function MapScreen() {
     autoZoomedRef.current = true;
     const timer = setTimeout(() => flyToLocation(currentLocation ?? toronto), 900);
     return () => clearTimeout(timer);
-  }, [currentLocation, flyToLocation, mapReady]);
+  }, [currentLocation, flyToLocation, mapReady, mapReadyGeneration]);
+
+  useEffect(() => {
+    if (ownsMapRenderer) return;
+    // The native map is deliberately destroyed while backgrounded or
+    // pre-empted. Reset its readiness bookkeeping too, otherwise the fresh
+    // instance returns at the world camera without running its initial zoom.
+    setMapReady(false);
+    autoZoomedRef.current = false;
+    if (resetTimerRef.current) {
+      clearTimeout(resetTimerRef.current);
+      resetTimerRef.current = null;
+    }
+  }, [ownsMapRenderer]);
 
   async function chooseMediaForMap() {
     if (!selected) return Alert.alert('Pick a coordinate first', 'Tap the map where this post should live.');
@@ -153,7 +167,13 @@ export function MapScreen() {
     const asset = result.assets[0];
     setUploading(true);
     try {
-      await uploadPostMedia({ uri: asset.uri, mediaType: asset.type === 'video' ? 'video' : 'photo', latitude: selected.latitude, longitude: selected.longitude });
+      await uploadPostMedia({
+        uri: asset.uri,
+        mediaType: asset.type === 'video' ? 'video' : 'photo',
+        latitude: selected.latitude,
+        longitude: selected.longitude,
+        sizeBytes: asset.fileSize,
+      });
       setSelected(null); await load(); Alert.alert('Posted', 'Your media was posted to the map.');
     } catch (e: any) { Alert.alert('Upload failed', e.message); }
     finally { setUploading(false); }
@@ -190,7 +210,13 @@ export function MapScreen() {
       showsPointsOfInterest
       showsScale={false}
       showsUserLocation
-      onMapReady={() => setMapReady(true)}
+      onMapReady={() => {
+        // A background release creates a brand-new native map. Track each
+        // ready callback even if React has not yet committed mapReady=false.
+        autoZoomedRef.current = false;
+        setMapReady(true);
+        setMapReadyGeneration(generation => generation + 1);
+      }}
       onPress={event => setSelected(event.nativeEvent.coordinate)}
     >
       {mappedPosts.map((post, index) => <React.Fragment key={post.id}>

@@ -105,10 +105,12 @@ object PoplurPerformanceManager : ComponentCallbacks2 {
     recomputeMode()
   }
 
+  @Synchronized
   fun addObserver(observer: Observer) {
     observers.add(observer)
   }
 
+  @Synchronized
   fun removeObserver(observer: Observer) {
     observers.remove(observer)
   }
@@ -200,9 +202,11 @@ object PoplurPerformanceManager : ComponentCallbacks2 {
       handler.post { notifyObservers() }
       return
     }
-    observers.toList().forEach { it.onPoplurPerformanceChanged() }
+    val snapshot = synchronized(this) { observers.toList() }
+    snapshot.forEach { it.onPoplurPerformanceChanged() }
   }
 
+  @Synchronized
   fun state(): Map<String, Any?> = mapOf(
     "mode" to mode.name,
     "thermalState" to thermalStateName(),

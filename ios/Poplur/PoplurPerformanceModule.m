@@ -16,6 +16,14 @@ RCT_EXPORT_MODULE(PoplurPerformanceNative)
   return YES;
 }
 
+- (dispatch_queue_t)methodQueue
+{
+  // Observer registration and every manager callback are main-thread owned.
+  // RCTEventEmitter otherwise invokes add/remove listener hooks on its module
+  // queue, tripping the manager's thread invariant in debug builds.
+  return dispatch_get_main_queue();
+}
+
 - (NSArray<NSString *> *)supportedEvents
 {
   return @[@"PoplurPerformanceDidChange"];

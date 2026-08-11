@@ -282,16 +282,26 @@ export class PoplurPerformanceManager {
 
   applyNativeState(state: NativePerformanceState) {
     const previousPressure = this.memoryPressure;
+    const previousWarningCount = this.memoryWarningCount;
     if (state.thermalState !== undefined) this.thermalCondition = normalizeThermal(state.thermalState);
     if (state.lowPowerMode !== undefined) this.lowPowerMode = state.lowPowerMode;
     if (state.memoryPressure !== undefined) this.memoryPressure = normalizeMemoryPressure(state.memoryPressure);
     if (typeof state.memoryWarningCount === 'number') this.memoryWarningCount = Math.max(this.memoryWarningCount, state.memoryWarningCount);
     if (typeof state.cacheBudgetBytes === 'number' && Number.isFinite(state.cacheBudgetBytes)) {
-      this.baseCacheBudgetBytes = Math.max(32 * MiB, Math.floor(state.cacheBudgetBytes));
+      this.baseCacheBudgetBytes = Math.min(
+        POPLUR_CACHE_TIERS.high,
+        Math.max(32 * MiB, Math.floor(state.cacheBudgetBytes)),
+      );
     }
     if (state.appActive !== undefined) this.nativeAppActive = state.appActive;
 
-    if (this.memoryPressure !== previousPressure && this.memoryPressure !== 'normal') {
+    // Native platforms can deliver multiple warnings while already in the
+    // same pressure state. Every new warning must purge again; otherwise
+    // resources admitted after the first warning survive the next one.
+    if (this.memoryPressure !== 'normal' && (
+      this.memoryPressure !== previousPressure
+      || this.memoryWarningCount > previousWarningCount
+    )) {
       const removed = poplurAssetCache.handleMemoryPressure(this.memoryPressure === 'critical' ? 'critical' : 'warning');
       if (isDebug() && removed.length) {
         console.info(`[PoplurPerformance] Purged ${removed.length} cached assets for memory pressure`);

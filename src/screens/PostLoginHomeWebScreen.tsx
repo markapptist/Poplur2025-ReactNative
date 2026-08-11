@@ -47,7 +47,7 @@ import {
 // homeReady).
 
 // Bump when the staged claymap.zip changes so devices re-extract.
-const BUNDLE_VERSION = '68';
+const BUNDLE_VERSION = '69';
 
 const CLAYMAP_ZIP = require('../assets/claymap/claymap.zip');
 const WEB_HOME_ORIGIN = 'http://127.0.0.1:5173';
@@ -65,8 +65,23 @@ const RN_NATIVE_SHELL = `
 `;
 
 async function prepareBundle(): Promise<string> {
-  const root = `${FileSystem.documentDirectory}claymap-v${BUNDLE_VERSION}`;
+  const documentRoot = FileSystem.documentDirectory;
+  if (!documentRoot) throw new Error('Poplur storage is unavailable.');
+  const activeDirectoryName = `claymap-v${BUNDLE_VERSION}`;
+  const root = `${documentRoot}${activeDirectoryName}`;
   const marker = `${root}/.extracted`;
+
+  // Versioned extractions used to accumulate forever. Keep exactly the
+  // active bundle and remove stale/partial predecessors from Poplur's own
+  // sandbox before admitting another copy.
+  const entries = await FileSystem.readDirectoryAsync(documentRoot).catch(() => [] as string[]);
+  const staleDirectories = entries.filter(
+    name => /^claymap-v\d+$/.test(name) && name !== activeDirectoryName,
+  );
+  for (const name of staleDirectories) {
+    await FileSystem.deleteAsync(`${documentRoot}${name}`, { idempotent: true });
+  }
+
   const markerInfo = await FileSystem.getInfoAsync(marker);
   if (!markerInfo.exists) {
     const asset = Asset.fromModule(CLAYMAP_ZIP);
@@ -76,6 +91,9 @@ async function prepareBundle(): Promise<string> {
     await unzip(zipUri.replace('file://', ''), root.replace('file://', ''));
     await FileSystem.writeAsStringAsync(marker, 'ok');
   }
+  // Captures are session scratch files, not part of the durable web bundle.
+  // Clear anything left by a crash before the static server starts.
+  await FileSystem.deleteAsync(`${root}/captures`, { idempotent: true });
   return root.replace('file://', '');
 }
 
@@ -117,6 +135,12 @@ type MediaAsset = {
   duration?: number | null;
   width?: number | null;
   height?: number | null;
+};
+
+type CaptureCacheRecord = {
+  key: string;
+  sizeBytes: number;
+  release: () => void;
 };
 
 function assetKind(asset: MediaAsset): 'photo' | 'video' {
@@ -177,6 +201,9 @@ export function PostLoginHomeWebScreen({
     true,
     { priority: 100, decorative: false },
   );
+  const keepWebSurfaceMounted = ownsHeavyRenderer
+    || performance.appState !== 'active'
+    || !performance.documentVisible;
   const runtimeSnapshot = {
     ...performance,
     appState: ownsHeavyRenderer ? 'active' as const : 'background' as const,
@@ -184,7 +211,7 @@ export function PostLoginHomeWebScreen({
   };
   const injectedShellRef = useRef(`${RN_NATIVE_SHELL}\n${createWebPerformanceBootstrap(runtimeSnapshot)}`);
   const captureSessionPrefixRef = useRef(`temporary:home-capture:${Date.now()}-${Math.random().toString(36).slice(2)}:`);
-  const captureCacheKeysRef = useRef(new Map<string, string>());
+  const captureCacheKeysRef = useRef(new Map<string, CaptureCacheRecord>());
 
   const pushPerformancePolicy = useCallback(() => {
     webViewRef.current?.injectJavaScript(createWebPerformanceUpdate(runtimeSnapshot));
@@ -205,6 +232,7 @@ export function PostLoginHomeWebScreen({
 
   useEffect(() => () => {
     cameraLiveVisibleRef.current = false;
+    captureCacheKeysRef.current.forEach(record => record.release());
     poplurAssetCache.purgeMatching(
       key => key.startsWith(captureSessionPrefixRef.current),
       true,
@@ -383,6 +411,7 @@ export function PostLoginHomeWebScreen({
     const captureDirectory = `${fileRoot}/captures`;
     const destination = `${captureDirectory}/${filename}`;
     await FileSystem.makeDirectoryAsync(captureDirectory, { intermediates: true }).catch(() => {});
+    captureCacheKeysRef.current.forEach(record => record.release());
     poplurAssetCache.purgeMatching(
       key => key.startsWith(captureSessionPrefixRef.current),
       true,
@@ -404,7 +433,16 @@ export function PostLoginHomeWebScreen({
     if (!admission.admitted) {
       throw new Error(`The captured media exceeded Poplur's active cache budget (${admission.reason}).`);
     }
-    captureCacheKeysRef.current.set(src, cacheKey);
+    const lease = poplurAssetCache.retain<string>(cacheKey);
+    if (!lease) {
+      poplurAssetCache.delete(cacheKey, true);
+      throw new Error('The captured media could not be retained safely.');
+    }
+    captureCacheKeysRef.current.set(src, {
+      key: cacheKey,
+      sizeBytes: info.size,
+      release: lease.release,
+    });
 
     return {
       kind,
@@ -452,9 +490,11 @@ export function PostLoginHomeWebScreen({
     if (!requestId || !message.data) return;
     try {
       const kind = message.kind === 'video' ? 'video' : 'photo';
+      const captureRecord = captureCacheKeysRef.current.get(message.data);
       await uploadPostMedia({
         uri: message.data,
         mediaType: kind,
+        sizeBytes: captureRecord?.sizeBytes,
         latitude: Number.isFinite(message.latitude) ? message.latitude : undefined,
         longitude: Number.isFinite(message.longitude) ? message.longitude : undefined,
         caption: message.caption,
@@ -464,10 +504,10 @@ export function PostLoginHomeWebScreen({
         radiusMeters: Number.isFinite(message.radiusKm) ? Math.round(Number(message.radiusKm) * 1000) : undefined,
       });
       dispatchToClay('poplur-upload-result', { requestId, ok: true });
-      const cacheKey = captureCacheKeysRef.current.get(message.data);
-      if (cacheKey) {
+      if (captureRecord) {
         captureCacheKeysRef.current.delete(message.data);
-        poplurAssetCache.delete(cacheKey, true);
+        captureRecord.release();
+        poplurAssetCache.delete(captureRecord.key, true);
       }
     } catch (error) {
       const fallback = 'Your post could not be uploaded.';
@@ -584,7 +624,7 @@ export function PostLoginHomeWebScreen({
   return (
     <View style={styles.container}>
       <StatusBar style="light" />
-      {homeUri && ownsHeavyRenderer && Platform.OS === 'web' && (
+      {homeUri && keepWebSurfaceMounted && Platform.OS === 'web' && (
         <WebHomeIframe
           ref={iframeRef}
           src={homeUri}
@@ -597,7 +637,7 @@ export function PostLoginHomeWebScreen({
           style={webIframeStyle}
         />
       )}
-      {homeUri && ownsHeavyRenderer && Platform.OS !== 'web' && (
+      {homeUri && keepWebSurfaceMounted && Platform.OS !== 'web' && (
         <WebView
           ref={webViewRef}
           style={styles.web}

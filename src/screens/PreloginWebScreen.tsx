@@ -160,7 +160,13 @@ const PERF_TWEAKS = `<style id="poplur-perf">
 async function preparePage(page: Page): Promise<string> {
   let html = await readHtml(pageModules[page]);
   for (const [sourcePath, moduleRef] of mediaModules) {
-    html = html.split(sourcePath).join(await localUri(moduleRef));
+    // Splash and welcome reference different subsets of the bundled media.
+    // Do not materialize large GLBs/audio files that the active page cannot
+    // use; Metro still packages required assets, but the runtime cache stays
+    // bounded to the page that is actually on screen.
+    if (html.includes(sourcePath)) {
+      html = html.split(sourcePath).join(await localUri(moduleRef));
+    }
   }
 
   // Always run the approved live login cube. The page's own watchdog retries
@@ -203,6 +209,9 @@ export function PreloginWebScreen({ splashOnly = false, onPermissionSequenceHand
     true,
     { priority: splashOnly ? 10 : 90, decorative: false },
   );
+  const keepWebSurfaceMounted = ownsHeavyRenderer
+    || performance.appState !== 'active'
+    || !performance.documentVisible;
   const runtimeActive = ownsHeavyRenderer;
   const runtimeSnapshot = {
     ...performance,
@@ -395,7 +404,7 @@ export function PreloginWebScreen({ splashOnly = false, onPermissionSequenceHand
   return (
     <View style={[styles.container, { backgroundColor }]}>
       <StatusBar style="light" />
-      {source && ownsHeavyRenderer ? (
+      {source && keepWebSurfaceMounted ? (
         <WebView
           key={`prelogin-${page}-${cubeHostRecoveryKey}`}
           ref={webViewRef}
