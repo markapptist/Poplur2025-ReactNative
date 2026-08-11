@@ -7,6 +7,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { fetchRecentPosts, uploadPostMedia } from '../services/posts';
 import type { Post } from '../types/models';
 import { loadMapMode, mark2DNoticeSeen, shouldShow2DNotice, type MapMode } from '../services/mapMode';
+import { usePoplurHeavyRenderer, usePoplurPerformance } from '../performance/PoplurPerformance';
+import { PoplurPerformanceMode } from '../performance/PoplurPerformanceManager';
 
 const toronto: LatLng = { latitude: 43.6532, longitude: -79.3832 };
 const earthRadiusKm = 6371;
@@ -33,6 +35,7 @@ export function MapScreen() {
   const mapRef = useRef<MapView | null>(null);
   const { width, height } = useWindowDimensions();
   const autoZoomedRef = useRef(false);
+  const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [posts, setPosts] = useState<Post[]>([]);
   const [selected, setSelected] = useState<LatLng | null>(null);
   const [currentLocation, setCurrentLocation] = useState<LatLng | null>(null);
@@ -40,12 +43,22 @@ export function MapScreen() {
   const [mapReady, setMapReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [mapMode, setMapMode] = useState<MapMode>('3d');
+  const performance = usePoplurPerformance();
+  const ownsMapRenderer = usePoplurHeavyRenderer(
+    'native-map-surface',
+    true,
+    { priority: 90, decorative: false },
+  );
+  const effectiveMapMode: MapMode = performance.mode === PoplurPerformanceMode.LOW_POWER
+    || performance.mode === PoplurPerformanceMode.EMERGENCY
+    ? '2d'
+    : mapMode;
 
   const mappedPosts = useMemo(() => posts.filter(post => post.latitude != null && post.longitude != null), [posts]);
   const totalViews = useMemo(() => mappedPosts.reduce((sum, post) => sum + post.viewCount, 0), [mappedPosts]);
   const radiusKm = selected ? Math.max(0, Math.round(distanceKm(currentLocation ?? toronto, selected))) : 0;
   const isAndroid = Platform.OS === 'android';
-  const mapType = mapMode === '2d' ? 'standard' : Platform.OS === 'ios' ? 'hybridFlyover' : 'hybrid';
+  const mapType = effectiveMapMode === '2d' ? 'standard' : Platform.OS === 'ios' ? 'hybridFlyover' : 'hybrid';
   const responsive = useMemo(() => {
     const shortSide = Math.min(width, height);
     const isTablet = shortSide >= 600;
@@ -89,8 +102,8 @@ export function MapScreen() {
   }, []);
 
   const flyToLocation = useCallback((coordinate: LatLng, duration = 2600) => {
-    mapRef.current?.animateCamera(locationCamera(coordinate, mapMode), { duration });
-  }, [mapMode]);
+    mapRef.current?.animateCamera(locationCamera(coordinate, effectiveMapMode), { duration });
+  }, [effectiveMapMode]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -107,20 +120,24 @@ export function MapScreen() {
     });
   }, []);
 
-  useEffect(() => { (async () => {
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status === 'granted') {
         const loc = await Location.getCurrentPositionAsync({});
+        if (cancelled) return;
         const coordinate = { latitude: loc.coords.latitude, longitude: loc.coords.longitude };
         setCurrentLocation(coordinate);
         setSelected(coordinate);
-        if (mapReady) flyToLocation(coordinate);
       }
     } catch (e: any) {
-      setError(e.message ?? 'Location could not be loaded.');
+      if (!cancelled) setError(e.message ?? 'Location could not be loaded.');
     }
-  })(); }, [flyToLocation, mapReady]);
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     if (!mapReady || autoZoomedRef.current) return;
@@ -144,11 +161,19 @@ export function MapScreen() {
 
   function resetToGlobe() {
     mapRef.current?.animateCamera(worldCamera, { duration: 1200 });
-    setTimeout(() => flyToLocation(currentLocation ?? toronto), 1450);
+    if (resetTimerRef.current) clearTimeout(resetTimerRef.current);
+    resetTimerRef.current = setTimeout(() => {
+      resetTimerRef.current = null;
+      flyToLocation(currentLocation ?? toronto);
+    }, 1450);
   }
 
+  useEffect(() => () => {
+    if (resetTimerRef.current) clearTimeout(resetTimerRef.current);
+  }, []);
+
   return <View style={styles.fill}>
-    <MapView
+    {ownsMapRenderer && <MapView
       ref={mapRef}
       provider={isAndroid ? PROVIDER_GOOGLE : PROVIDER_DEFAULT}
       mapType={mapType}
@@ -159,7 +184,7 @@ export function MapScreen() {
       loadingBackgroundColor="#000"
       loadingIndicatorColor="#fff"
       moveOnMarkerPress={false}
-      showsBuildings={mapMode === '3d'}
+      showsBuildings={effectiveMapMode === '3d'}
       showsCompass={false}
       showsMyLocationButton={false}
       showsPointsOfInterest
@@ -181,9 +206,9 @@ export function MapScreen() {
           <Ionicons name="navigate" color="#7dd3fc" size={34} />
         </View>
       </Marker>}
-    </MapView>
+    </MapView>}
 
-    {!mapReady && <View style={styles.loading}><Text style={styles.loadingText}>Loading hybrid map...</Text></View>}
+    {(!mapReady || !ownsMapRenderer) && <View style={styles.loading}><Text style={styles.loadingText}>{ownsMapRenderer ? 'Loading hybrid map...' : 'Map paused'}</Text></View>}
 
     <View pointerEvents="none" style={[styles.header, responsive.header]}>
       <Text style={[styles.title, responsive.title]}>Your Location</Text>

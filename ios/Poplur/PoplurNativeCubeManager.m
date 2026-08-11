@@ -2,6 +2,7 @@
 #import <React/RCTViewManager.h>
 #import <SceneKit/SceneKit.h>
 #import <UIKit/UIKit.h>
+#import "PoplurPerformanceManager.h"
 
 static NSArray<NSString *> *PoplurTabs(void)
 {
@@ -19,9 +20,12 @@ static NSDictionary<NSString *, UIColor *> *PoplurColors(void)
   };
 }
 
-@interface PoplurNativeCubeView : UIView
+@interface PoplurNativeCubeView : UIView <PoplurPerformanceObserver>
 @property (nonatomic, copy) NSString *activeTab;
 @property (nonatomic, copy) RCTDirectEventBlock onTabChange;
+@property (nonatomic, assign) BOOL active;
+@property (nonatomic, assign) NSInteger targetFps;
+@property (nonatomic, copy) NSString *performanceMode;
 @end
 
 @implementation PoplurNativeCubeView {
@@ -29,6 +33,7 @@ static NSDictionary<NSString *, UIColor *> *PoplurColors(void)
   SCNNode *_cubeNode;
   UILabel *_faceLabel;
   UIStackView *_rail;
+  BOOL _renderingActive;
 }
 
 - (instancetype)initWithFrame:(CGRect)frame
@@ -36,11 +41,16 @@ static NSDictionary<NSString *, UIColor *> *PoplurColors(void)
   if ((self = [super initWithFrame:frame])) {
     self.backgroundColor = UIColor.clearColor;
     _activeTab = @"feed";
+    _active = YES;
+    _targetFps = 30;
 
     _sceneView = [[SCNView alloc] initWithFrame:CGRectZero];
     _sceneView.backgroundColor = UIColor.clearColor;
     _sceneView.allowsCameraControl = NO;
     _sceneView.userInteractionEnabled = YES;
+    _sceneView.playing = NO;
+    _sceneView.rendersContinuously = NO;
+    _sceneView.preferredFramesPerSecond = 30;
     [self addSubview:_sceneView];
 
     SCNScene *scene = [SCNScene scene];
@@ -122,8 +132,54 @@ static NSDictionary<NSString *, UIColor *> *PoplurColors(void)
     [_sceneView addGestureRecognizer:pan];
 
     [self refreshLabel];
+    [[PoplurPerformanceManager sharedManager] addObserver:self];
+    [self applyPerformancePolicy];
   }
   return self;
+}
+
+- (void)didMoveToWindow
+{
+  [super didMoveToWindow];
+  [self applyPerformancePolicy];
+}
+
+- (void)setHidden:(BOOL)hidden
+{
+  [super setHidden:hidden];
+  [self applyPerformancePolicy];
+}
+
+- (void)setActive:(BOOL)active
+{
+  _active = active;
+  [self applyPerformancePolicy];
+}
+
+- (void)setTargetFps:(NSInteger)targetFps
+{
+  _targetFps = MAX(1, targetFps);
+  [self applyPerformancePolicy];
+}
+
+- (void)setPerformanceMode:(NSString *)performanceMode
+{
+  _performanceMode = [performanceMode copy];
+  [self applyPerformancePolicy];
+}
+
+- (void)applyPerformancePolicy
+{
+  PoplurPerformanceManager *manager = [PoplurPerformanceManager sharedManager];
+  BOOL visible = self.active && !self.hidden && self.window != nil && manager.appActive;
+  _renderingActive = visible;
+  _sceneView.preferredFramesPerSecond = MIN(self.targetFps, manager.targetFramesPerSecond);
+  _sceneView.playing = NO;
+}
+
+- (void)poplurPerformanceManagerDidChange:(PoplurPerformanceManager *)manager
+{
+  [self applyPerformancePolicy];
 }
 
 - (void)layoutSubviews
@@ -183,11 +239,27 @@ static NSDictionary<NSString *, UIColor *> *PoplurColors(void)
 
 - (void)animateToActiveTab
 {
+  if (!_renderingActive) {
+    _cubeNode.eulerAngles = [self rotationForTab:_activeTab];
+    return;
+  }
   [SCNTransaction begin];
   [SCNTransaction setAnimationDuration:0.34];
   [SCNTransaction setAnimationTimingFunction:[CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseInEaseOut]];
   _cubeNode.eulerAngles = [self rotationForTab:_activeTab];
   [SCNTransaction commit];
+}
+
+- (void)dealloc
+{
+  [[PoplurPerformanceManager sharedManager] removeObserver:self];
+  [_sceneView.scene.rootNode removeAllActions];
+  [_sceneView.scene.rootNode enumerateChildNodesUsingBlock:^(SCNNode *node, BOOL *stop) {
+    [node removeAllActions];
+    [node removeFromParentNode];
+  }];
+  _sceneView.scene = nil;
+  _sceneView.delegate = nil;
 }
 
 - (void)rebuildRail
@@ -276,6 +348,9 @@ static NSDictionary<NSString *, UIColor *> *PoplurColors(void)
 RCT_EXPORT_MODULE(PoplurNativeCube)
 RCT_EXPORT_VIEW_PROPERTY(activeTab, NSString)
 RCT_EXPORT_VIEW_PROPERTY(onTabChange, RCTDirectEventBlock)
+RCT_EXPORT_VIEW_PROPERTY(active, BOOL)
+RCT_EXPORT_VIEW_PROPERTY(targetFps, NSInteger)
+RCT_EXPORT_VIEW_PROPERTY(performanceMode, NSString)
 
 - (UIView *)view
 {

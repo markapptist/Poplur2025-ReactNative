@@ -21,6 +21,14 @@ import {
   useNativeVoiceAssistant,
   type NativeVoiceCommand,
 } from '../services/nativeVoiceAssistant';
+import { poplurAssetCache } from '../performance/PoplurAssetCache';
+import { usePoplurHeavyRenderer, usePoplurPerformance } from '../performance/PoplurPerformance';
+import {
+  createWebPerformanceBootstrap,
+  createWebPerformanceUpdate,
+  thermalStateForMode,
+  webPerformanceMessage,
+} from '../performance/PoplurPerformanceManager';
 
 // Post-login HOME web embed (RN parity with iOS/Android Phase 3).
 //
@@ -134,6 +142,7 @@ type PermissionNeeds = {
 };
 
 const WebHomeIframe = 'iframe' as unknown as React.ComponentType<{
+  ref?: React.Ref<HTMLIFrameElement>;
   src: string;
   title: string;
   allow: string;
@@ -149,6 +158,7 @@ export function PostLoginHomeWebScreen({
   forcePermissionPrimer?: boolean;
 } = {}) {
   const webViewRef = useRef<WebView>(null);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
   const serverRef = useRef<Server | null>(null);
   const bundleRootRef = useRef<string | null>(null);
   const [origin, setOrigin] = useState<string | null>(null);
@@ -161,6 +171,46 @@ export function PostLoginHomeWebScreen({
   const pendingNativeVoiceCommandRef = useRef<NativeVoiceCommand | null>(null);
   const inAppBrowserOpenRef = useRef(false);
   const cameraLiveVisibleRef = useRef(false);
+  const performance = usePoplurPerformance();
+  const ownsHeavyRenderer = usePoplurHeavyRenderer(
+    'postlogin-web-home',
+    true,
+    { priority: 100, decorative: false },
+  );
+  const runtimeSnapshot = {
+    ...performance,
+    appState: ownsHeavyRenderer ? 'active' as const : 'background' as const,
+    documentVisible: ownsHeavyRenderer,
+  };
+  const injectedShellRef = useRef(`${RN_NATIVE_SHELL}\n${createWebPerformanceBootstrap(runtimeSnapshot)}`);
+  const captureSessionPrefixRef = useRef(`temporary:home-capture:${Date.now()}-${Math.random().toString(36).slice(2)}:`);
+  const captureCacheKeysRef = useRef(new Map<string, string>());
+
+  const pushPerformancePolicy = useCallback(() => {
+    webViewRef.current?.injectJavaScript(createWebPerformanceUpdate(runtimeSnapshot));
+    const frame = iframeRef.current?.contentWindow;
+    if (frame) {
+      frame.postMessage(webPerformanceMessage(runtimeSnapshot), '*');
+      frame.postMessage({
+        type: 'poplur-native-thermal',
+        state: thermalStateForMode(runtimeSnapshot.mode),
+      }, '*');
+    }
+    if (!ownsHeavyRenderer) cameraLiveVisibleRef.current = false;
+  }, [ownsHeavyRenderer, performance.mode, performance.targetFPS]);
+
+  useEffect(() => {
+    pushPerformancePolicy();
+  }, [pushPerformancePolicy]);
+
+  useEffect(() => () => {
+    cameraLiveVisibleRef.current = false;
+    poplurAssetCache.purgeMatching(
+      key => key.startsWith(captureSessionPrefixRef.current),
+      true,
+    );
+    captureCacheKeysRef.current.clear();
+  }, []);
 
   const sendProfileToWeb = async () => {
     try {
@@ -333,11 +383,32 @@ export function PostLoginHomeWebScreen({
     const captureDirectory = `${fileRoot}/captures`;
     const destination = `${captureDirectory}/${filename}`;
     await FileSystem.makeDirectoryAsync(captureDirectory, { intermediates: true }).catch(() => {});
+    poplurAssetCache.purgeMatching(
+      key => key.startsWith(captureSessionPrefixRef.current),
+      true,
+    );
+    captureCacheKeysRef.current.clear();
     await FileSystem.copyAsync({ from: asset.uri, to: destination });
+
+    const info = await FileSystem.getInfoAsync(destination, { size: true });
+    if (!info.exists) throw new Error('The captured media could not be cached.');
+    const cacheKey = `${captureSessionPrefixRef.current}${filename}`;
+    const src = `${origin}/captures/${filename}`;
+    const admission = poplurAssetCache.admit({
+      key: cacheKey,
+      kind: kind === 'video' ? 'video' : 'temporary',
+      value: destination,
+      estimatedBytes: info.size,
+      dispose: () => FileSystem.deleteAsync(destination, { idempotent: true }),
+    });
+    if (!admission.admitted) {
+      throw new Error(`The captured media exceeded Poplur's active cache budget (${admission.reason}).`);
+    }
+    captureCacheKeysRef.current.set(src, cacheKey);
 
     return {
       kind,
-      src: `${origin}/captures/${filename}`,
+      src,
       length: kind === 'video' ? clipLength(asset.duration) : undefined,
       width: kind === 'photo' && asset.width && asset.width > 0 ? asset.width : undefined,
       height: kind === 'photo' && asset.height && asset.height > 0 ? asset.height : undefined,
@@ -393,6 +464,11 @@ export function PostLoginHomeWebScreen({
         radiusMeters: Number.isFinite(message.radiusKm) ? Math.round(Number(message.radiusKm) * 1000) : undefined,
       });
       dispatchToClay('poplur-upload-result', { requestId, ok: true });
+      const cacheKey = captureCacheKeysRef.current.get(message.data);
+      if (cacheKey) {
+        captureCacheKeysRef.current.delete(message.data);
+        poplurAssetCache.delete(cacheKey, true);
+      }
     } catch (error) {
       const fallback = 'Your post could not be uploaded.';
       dispatchToClay('poplur-upload-result', {
@@ -508,26 +584,28 @@ export function PostLoginHomeWebScreen({
   return (
     <View style={styles.container}>
       <StatusBar style="light" />
-      {homeUri && Platform.OS === 'web' && (
+      {homeUri && ownsHeavyRenderer && Platform.OS === 'web' && (
         <WebHomeIframe
+          ref={iframeRef}
           src={homeUri}
           title="Poplur post-login"
           allow="geolocation; camera; microphone"
-          onLoad={markHomeReady}
+          onLoad={() => {
+            pushPerformancePolicy();
+            markHomeReady();
+          }}
           style={webIframeStyle}
         />
       )}
-      {homeUri && Platform.OS !== 'web' && (
+      {homeUri && ownsHeavyRenderer && Platform.OS !== 'web' && (
         <WebView
           ref={webViewRef}
           style={styles.web}
           source={{ uri: homeUri }}
           originWhitelist={['*']}
-          injectedJavaScriptBeforeContentLoaded={RN_NATIVE_SHELL}
+          injectedJavaScriptBeforeContentLoaded={injectedShellRef.current}
           onMessage={handleMessage}
-          onLoadEnd={() => {
-            if (Platform.OS === 'web') setHomeReady(true);
-          }}
+          onLoadEnd={pushPerformancePolicy}
           allowsInlineMediaPlayback
           mediaPlaybackRequiresUserAction={false}
           javaScriptEnabled

@@ -18,7 +18,7 @@ import com.facebook.react.uimanager.events.RCTEventEmitter
 import kotlin.math.abs
 import kotlin.math.max
 
-class PoplurNativeCubeView(private val reactContext: ThemedReactContext) : View(reactContext) {
+class PoplurNativeCubeView(private val reactContext: ThemedReactContext) : View(reactContext), PoplurPerformanceManager.Observer {
   private data class Face(val tab: String, val indices: IntArray)
   private data class ProjectedFace(val face: Face, val points: List<Pair<Float, Float>>, val depth: Float)
 
@@ -69,6 +69,9 @@ class PoplurNativeCubeView(private val reactContext: ThemedReactContext) : View(
   private var rotationX = 0f
   private var rotationY = 0f
   private var animator: ValueAnimator? = null
+  private var requestedActive = true
+  private var requestedTargetFps = 30
+  private var lastAnimationDrawNanos = 0L
   private val gestureDetector = GestureDetector(context, CubeGestureListener())
 
   init {
@@ -82,6 +85,46 @@ class PoplurNativeCubeView(private val reactContext: ThemedReactContext) : View(
     activeTab = next
     animateTo(next)
     invalidate()
+  }
+
+  fun setPerformanceActive(active: Boolean) {
+    requestedActive = active
+    applyPerformancePolicy()
+  }
+
+  fun setTargetFps(targetFps: Int) {
+    requestedTargetFps = targetFps.coerceIn(1, 60)
+  }
+
+  override fun onAttachedToWindow() {
+    super.onAttachedToWindow()
+    PoplurPerformanceManager.addObserver(this)
+    applyPerformancePolicy()
+  }
+
+  override fun onDetachedFromWindow() {
+    dispose()
+    super.onDetachedFromWindow()
+  }
+
+  override fun onWindowVisibilityChanged(visibility: Int) {
+    super.onWindowVisibilityChanged(visibility)
+    applyPerformancePolicy()
+  }
+
+  override fun onVisibilityChanged(changedView: View, visibility: Int) {
+    super.onVisibilityChanged(changedView, visibility)
+    applyPerformancePolicy()
+  }
+
+  override fun onPoplurPerformanceChanged() {
+    applyPerformancePolicy()
+  }
+
+  fun dispose() {
+    animator?.cancel()
+    animator = null
+    PoplurPerformanceManager.removeObserver(this)
   }
 
   override fun onDraw(canvas: Canvas) {
@@ -176,6 +219,11 @@ class PoplurNativeCubeView(private val reactContext: ThemedReactContext) : View(
       interpolator = DecelerateInterpolator()
       addUpdateListener {
         val progress = it.animatedValue as Float
+        val now = System.nanoTime()
+        val targetFps = minOf(requestedTargetFps, PoplurPerformanceManager.targetFramesPerSecond).coerceAtLeast(1)
+        val frameNanos = 1_000_000_000L / targetFps
+        if (progress < 1f && now - lastAnimationDrawNanos < frameNanos) return@addUpdateListener
+        lastAnimationDrawNanos = now
         rotationX = startX + (targetX - startX) * progress
         rotationY = startY + (targetY - startY) * progress
         invalidate()
@@ -247,5 +295,14 @@ class PoplurNativeCubeView(private val reactContext: ThemedReactContext) : View(
       (Color.green(color) * shade).toInt().coerceIn(0, 255),
       (Color.blue(color) * shade).toInt().coerceIn(0, 255)
     )
+  }
+
+  private fun applyPerformancePolicy() {
+    val active = requestedActive
+      && isAttachedToWindow
+      && visibility == VISIBLE
+      && windowVisibility == VISIBLE
+      && PoplurPerformanceManager.appActive
+    if (!active) animator?.cancel()
   }
 }

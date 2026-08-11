@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, AppState, Platform, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Platform, StyleSheet, View } from 'react-native';
 import { Asset } from 'expo-asset';
 import * as FileSystem from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
@@ -10,6 +10,11 @@ import WebView, { WebViewMessageEvent } from 'react-native-webview';
 import { saveUserProfile, signInWithUsernameOrEmail } from '../services/auth';
 import { auth } from '../services/firebase';
 import { markPermissionPrimerHandled } from '../services/permissionPrimer';
+import { usePoplurHeavyRenderer, usePoplurPerformance } from '../performance/PoplurPerformance';
+import {
+  createWebPerformanceBootstrap,
+  createWebPerformanceUpdate,
+} from '../performance/PoplurPerformanceManager';
 
 type Page = 'splash' | 'welcome';
 type AssetModule = number;
@@ -174,35 +179,10 @@ async function preparePage(page: Page): Promise<string> {
   return html;
 }
 
-// Minimizing the app must silence the pre-login radio bed. The bundled pages
-// carry no `visibilitychange` handler — they are GENERATED from the protected
-// Good Copy sources — and neither iOS nor Android pauses WebView media on its
-// own, so the host owns the pause. Mirrors PreloginWebView.swift (iOS) and
-// PreloginWebActivity.kt (Android).
-//
-// Only what THIS code paused is resumed, so a bed the person muted or paused in
-// the web UI stays that way when they come back.
 // The same coordinates the approved Welcome source hardcodes, used whenever the
 // person has not already granted location.
 const FALLBACK_LAT = 43.6532;
 const FALLBACK_LON = -79.3832;
-
-const SUSPEND_MEDIA_JS = `(function(){
-  window.__poplurSuspended = [];
-  document.querySelectorAll('audio,video').forEach(function (m) {
-    if (!m.paused) { window.__poplurSuspended.push(m); m.pause(); }
-  });
-  // The AI host is not an <audio> tag — welcome.html's speakAI() uses the Web
-  // Speech API, so pausing media elements alone leaves the voice talking.
-  try { window.speechSynthesis && window.speechSynthesis.cancel(); } catch (e) {}
-})(); true;`;
-
-const RESUME_MEDIA_JS = `(function(){
-  (window.__poplurSuspended || []).forEach(function (m) {
-    var r = m.play(); if (r && r.catch) r.catch(function(){});
-  });
-  window.__poplurSuspended = [];
-})(); true;`;
 
 export function PreloginWebScreen({ splashOnly = false, onPermissionSequenceHandled }: {
   splashOnly?: boolean;
@@ -217,6 +197,19 @@ export function PreloginWebScreen({ splashOnly = false, onPermissionSequenceHand
   const [page, setPage] = useState<Page>(splashOnly ? 'splash' : 'welcome');
   const [html, setHtml] = useState<string | null>(null);
   const [cubeHostRecoveryKey, setCubeHostRecoveryKey] = useState(0);
+  const performance = usePoplurPerformance();
+  const ownsHeavyRenderer = usePoplurHeavyRenderer(
+    splashOnly ? 'prelogin-splash-video' : 'prelogin-web-3d',
+    true,
+    { priority: splashOnly ? 10 : 90, decorative: false },
+  );
+  const runtimeActive = ownsHeavyRenderer;
+  const runtimeSnapshot = {
+    ...performance,
+    appState: runtimeActive ? 'active' as const : 'background' as const,
+    documentVisible: runtimeActive,
+  };
+  const injectedBridgeRef = useRef(`${RN_BRIDGE}\n${createWebPerformanceBootstrap(runtimeSnapshot)}`);
 
   useEffect(() => {
     let cancelled = false;
@@ -246,13 +239,8 @@ export function PreloginWebScreen({ splashOnly = false, onPermissionSequenceHand
   }, [splashOnly]);
 
   useEffect(() => {
-    const subscription = AppState.addEventListener('change', state => {
-      webViewRef.current?.injectJavaScript(
-        state === 'active' ? RESUME_MEDIA_JS : SUSPEND_MEDIA_JS
-      );
-    });
-    return () => subscription.remove();
-  }, []);
+    webViewRef.current?.injectJavaScript(createWebPerformanceUpdate(runtimeSnapshot));
+  }, [performance.mode, performance.targetFPS, runtimeActive]);
 
   const handleMessage = async (event: WebViewMessageEvent) => {
     let message: { action?: string; payload?: string };
@@ -407,14 +395,15 @@ export function PreloginWebScreen({ splashOnly = false, onPermissionSequenceHand
   return (
     <View style={[styles.container, { backgroundColor }]}>
       <StatusBar style="light" />
-      {source ? (
+      {source && ownsHeavyRenderer ? (
         <WebView
           key={`prelogin-${page}-${cubeHostRecoveryKey}`}
           ref={webViewRef}
           source={source}
           originWhitelist={['*']}
-          injectedJavaScriptBeforeContentLoaded={RN_BRIDGE}
+          injectedJavaScriptBeforeContentLoaded={injectedBridgeRef.current}
           onMessage={handleMessage}
+          onLoadEnd={() => webViewRef.current?.injectJavaScript(createWebPerformanceUpdate(runtimeSnapshot))}
           javaScriptEnabled
           domStorageEnabled
           allowsInlineMediaPlayback

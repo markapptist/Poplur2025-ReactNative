@@ -1,8 +1,10 @@
 #import <React/RCTViewManager.h>
 #import <SpriteKit/SpriteKit.h>
 #import <UIKit/UIKit.h>
+#import "PoplurPerformanceManager.h"
 
 @interface PoplurConfettiScene : SKScene
+- (void)applyParticleDensity:(CGFloat)density;
 @end
 
 @implementation PoplurConfettiScene
@@ -15,6 +17,15 @@
     [self buildEmitters];
   }
   return self;
+}
+
+- (void)applyParticleDensity:(CGFloat)density
+{
+  CGFloat clamped = MAX(0, MIN(1, density));
+  for (SKEmitterNode *emitter in self.children) {
+    emitter.particleBirthRate = 18.0 * clamped;
+    if (clamped == 0) [emitter resetSimulation];
+  }
 }
 
 - (void)didChangeSize:(CGSize)oldSize
@@ -75,7 +86,11 @@
 
 @end
 
-@interface PoplurNativeConfettiView : UIView
+@interface PoplurNativeConfettiView : UIView <PoplurPerformanceObserver>
+@property (nonatomic, assign) BOOL active;
+@property (nonatomic, assign) NSInteger targetFps;
+@property (nonatomic, assign) CGFloat particleDensity;
+@property (nonatomic, copy) NSString *performanceMode;
 @end
 
 @implementation PoplurNativeConfettiView {
@@ -88,18 +103,88 @@
   if ((self = [super initWithFrame:frame])) {
     self.backgroundColor = UIColor.clearColor;
     self.userInteractionEnabled = NO;
+    _active = YES;
+    _targetFps = 30;
+    _particleDensity = 1;
 
     _skView = [[SKView alloc] initWithFrame:CGRectZero];
     _skView.backgroundColor = UIColor.clearColor;
     _skView.allowsTransparency = YES;
     _skView.userInteractionEnabled = NO;
+    _skView.preferredFramesPerSecond = 30;
     [self addSubview:_skView];
 
     _scene = [[PoplurConfettiScene alloc] initWithSize:CGSizeMake(1.0, 1.0)];
     _scene.scaleMode = SKSceneScaleModeResizeFill;
     [_skView presentScene:_scene];
+    [[PoplurPerformanceManager sharedManager] addObserver:self];
+    [self applyPerformancePolicy];
   }
   return self;
+}
+
+- (void)didMoveToWindow
+{
+  [super didMoveToWindow];
+  [self applyPerformancePolicy];
+}
+
+- (void)setHidden:(BOOL)hidden
+{
+  [super setHidden:hidden];
+  [self applyPerformancePolicy];
+}
+
+- (void)setActive:(BOOL)active
+{
+  _active = active;
+  [self applyPerformancePolicy];
+}
+
+- (void)setTargetFps:(NSInteger)targetFps
+{
+  _targetFps = MAX(1, targetFps);
+  [self applyPerformancePolicy];
+}
+
+- (void)setParticleDensity:(CGFloat)particleDensity
+{
+  _particleDensity = MAX(0, MIN(1, particleDensity));
+  [self applyPerformancePolicy];
+}
+
+- (void)setPerformanceMode:(NSString *)performanceMode
+{
+  _performanceMode = [performanceMode copy];
+  [self applyPerformancePolicy];
+}
+
+- (void)applyPerformancePolicy
+{
+  PoplurPerformanceManager *manager = [PoplurPerformanceManager sharedManager];
+  BOOL visible = self.active && !self.hidden && self.window != nil && manager.appActive && manager.particlesAllowed;
+  BOOL granted = visible && [manager acquireHeavyRenderer:self identifier:@"native-confetti" decorative:YES];
+  if (!granted) [manager releaseHeavyRenderer:self];
+  _skView.preferredFramesPerSecond = MIN(self.targetFps, manager.targetFramesPerSecond);
+  [_scene applyParticleDensity:granted ? MIN(self.particleDensity, manager.particleDensityMultiplier) : 0];
+  _scene.paused = !granted;
+  _skView.paused = !granted;
+}
+
+- (void)poplurPerformanceManagerDidChange:(PoplurPerformanceManager *)manager
+{
+  [self applyPerformancePolicy];
+}
+
+- (void)dealloc
+{
+  PoplurPerformanceManager *manager = [PoplurPerformanceManager sharedManager];
+  [manager releaseHeavyRenderer:self];
+  [manager removeObserver:self];
+  _scene.paused = YES;
+  [_scene removeAllActions];
+  [_scene removeAllChildren];
+  [_skView presentScene:nil];
 }
 
 - (void)layoutSubviews
@@ -117,6 +202,10 @@
 @implementation PoplurNativeConfettiManager
 
 RCT_EXPORT_MODULE(PoplurNativeConfetti)
+RCT_EXPORT_VIEW_PROPERTY(active, BOOL)
+RCT_EXPORT_VIEW_PROPERTY(targetFps, NSInteger)
+RCT_EXPORT_VIEW_PROPERTY(particleDensity, CGFloat)
+RCT_EXPORT_VIEW_PROPERTY(performanceMode, NSString)
 
 - (UIView *)view
 {

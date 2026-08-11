@@ -13,6 +13,8 @@
 		3E461D99554A48A4959DE609 /* SplashScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */; };
 		4D9B2D7A6B3F4F54B69C3C8C /* PoplurNativeCubeManager.m in Sources */ = {isa = PBXBuildFile; fileRef = 4D9B2D796B3F4F54B69C3C8C /* PoplurNativeCubeManager.m */; };
 		4E6A1D3E9BC74B6E902B31D0 /* PoplurNativeConfettiManager.m in Sources */ = {isa = PBXBuildFile; fileRef = 4E6A1D3D9BC74B6E902B31D0 /* PoplurNativeConfettiManager.m */; };
+		A91F0B012CDE4A1180010001 /* PoplurPerformanceManager.m in Sources */ = {isa = PBXBuildFile; fileRef = A91F0B012CDE4A1180010011 /* PoplurPerformanceManager.m */; };
+		A91F0B012CDE4A1180010002 /* PoplurPerformanceModule.m in Sources */ = {isa = PBXBuildFile; fileRef = A91F0B012CDE4A1180010012 /* PoplurPerformanceModule.m */; };
 		96905EF65AED1B983A6B3ABC /* libPods-Poplur.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 58EEBF8E8E6FB1BC6CAF49B5 /* libPods-Poplur.a */; };
 		993CD36EF9794A0E8AD8DBDF /* noop-file.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8F6375EA92C42729F01B7E5 /* noop-file.swift */; };
 		B0DD0D936C231816522A452E /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 34851967DD2AD2259A7BF4E8 /* PrivacyInfo.xcprivacy */; };
@@ -30,6 +32,9 @@
 		34851967DD2AD2259A7BF4E8 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xml; name = PrivacyInfo.xcprivacy; path = Poplur/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		4D9B2D796B3F4F54B69C3C8C /* PoplurNativeCubeManager.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; name = PoplurNativeCubeManager.m; path = Poplur/PoplurNativeCubeManager.m; sourceTree = "<group>"; };
 		4E6A1D3D9BC74B6E902B31D0 /* PoplurNativeConfettiManager.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; name = PoplurNativeConfettiManager.m; path = Poplur/PoplurNativeConfettiManager.m; sourceTree = "<group>"; };
+		A91F0B012CDE4A1180010010 /* PoplurPerformanceManager.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = PoplurPerformanceManager.h; path = Poplur/PoplurPerformanceManager.h; sourceTree = "<group>"; };
+		A91F0B012CDE4A1180010011 /* PoplurPerformanceManager.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; name = PoplurPerformanceManager.m; path = Poplur/PoplurPerformanceManager.m; sourceTree = "<group>"; };
+		A91F0B012CDE4A1180010012 /* PoplurPerformanceModule.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; name = PoplurPerformanceModule.m; path = Poplur/PoplurPerformanceModule.m; sourceTree = "<group>"; };
 		58EEBF8E8E6FB1BC6CAF49B5 /* libPods-Poplur.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-Poplur.a"; sourceTree = BUILT_PRODUCTS_DIR; };
 		6C2E3173556A471DD304B334 /* Pods-Poplur.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Poplur.debug.xcconfig"; path = "Target Support Files/Pods-Poplur/Pods-Poplur.debug.xcconfig"; sourceTree = "<group>"; };
 		7A4D352CD337FB3A3BF06240 /* Pods-Poplur.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Poplur.release.xcconfig"; path = "Target Support Files/Pods-Poplur/Pods-Poplur.release.xcconfig"; sourceTree = "<group>"; };
@@ -64,6 +69,9 @@
 				13B07FB71A68108700A75B9A /* main.m */,
 				4D9B2D796B3F4F54B69C3C8C /* PoplurNativeCubeManager.m */,
 				4E6A1D3D9BC74B6E902B31D0 /* PoplurNativeConfettiManager.m */,
+				A91F0B012CDE4A1180010010 /* PoplurPerformanceManager.h */,
+				A91F0B012CDE4A1180010011 /* PoplurPerformanceManager.m */,
+				A91F0B012CDE4A1180010012 /* PoplurPerformanceModule.m */,
 				AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */,
 				C8F6375EA92C42729F01B7E5 /* noop-file.swift */,
 				B23AE0FB5F984AF88D388C78 /* Poplur-Bridging-Header.h */,
@@ -341,6 +349,8 @@
 				13B07FC11A68108700A75B9A /* main.m in Sources */,
 				4D9B2D7A6B3F4F54B69C3C8C /* PoplurNativeCubeManager.m in Sources */,
 				4E6A1D3E9BC74B6E902B31D0 /* PoplurNativeConfettiManager.m in Sources */,
+				A91F0B012CDE4A1180010001 /* PoplurPerformanceManager.m in Sources */,
+				A91F0B012CDE4A1180010002 /* PoplurPerformanceModule.m in Sources */,
 				B18059E884C0ABDD17F3DC3D /* ExpoModulesProvider.swift in Sources */,
 				993CD36EF9794A0E8AD8DBDF /* noop-file.swift in Sources */,
 			);

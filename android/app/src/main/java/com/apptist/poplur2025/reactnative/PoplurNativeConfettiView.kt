@@ -9,7 +9,7 @@ import com.badlogic.gdx.math.MathUtils
 import com.badlogic.gdx.math.Vector2
 import com.facebook.react.uimanager.ThemedReactContext
 
-class PoplurNativeConfettiView(context: ThemedReactContext) : View(context) {
+class PoplurNativeConfettiView(context: ThemedReactContext) : View(context), PoplurPerformanceManager.Observer {
   private data class ConfettiPiece(
     val position: Vector2,
     val velocity: Vector2,
@@ -33,12 +33,15 @@ class PoplurNativeConfettiView(context: ThemedReactContext) : View(context) {
   private val pieces = mutableListOf<ConfettiPiece>()
   private var running = false
   private var lastFrameNanos = 0L
+  private var requestedActive = true
+  private var requestedTargetFps = 30
+  private var requestedParticleDensity = 1f
 
   private val ticker = object : Runnable {
     override fun run() {
       if (!running) return
       invalidate()
-      postOnAnimation(this)
+      postOnAnimationDelayed(this, frameDelayMillis())
     }
   }
 
@@ -50,15 +53,54 @@ class PoplurNativeConfettiView(context: ThemedReactContext) : View(context) {
 
   override fun onAttachedToWindow() {
     super.onAttachedToWindow()
-    running = true
-    lastFrameNanos = System.nanoTime()
-    postOnAnimation(ticker)
+    PoplurPerformanceManager.addObserver(this)
+    applyPerformancePolicy()
   }
 
   override fun onDetachedFromWindow() {
     running = false
     removeCallbacks(ticker)
+    PoplurPerformanceManager.releaseHeavyRenderer(this)
+    PoplurPerformanceManager.removeObserver(this)
+    pieces.clear()
     super.onDetachedFromWindow()
+  }
+
+  override fun onWindowVisibilityChanged(visibility: Int) {
+    super.onWindowVisibilityChanged(visibility)
+    applyPerformancePolicy()
+  }
+
+  override fun onVisibilityChanged(changedView: View, visibility: Int) {
+    super.onVisibilityChanged(changedView, visibility)
+    applyPerformancePolicy()
+  }
+
+  fun setPerformanceActive(active: Boolean) {
+    requestedActive = active
+    applyPerformancePolicy()
+  }
+
+  fun setTargetFps(targetFps: Int) {
+    requestedTargetFps = targetFps.coerceIn(1, 60)
+    applyPerformancePolicy()
+  }
+
+  fun setParticleDensity(density: Float) {
+    requestedParticleDensity = density.coerceIn(0f, 1f)
+    applyPerformancePolicy()
+  }
+
+  override fun onPoplurPerformanceChanged() {
+    applyPerformancePolicy()
+  }
+
+  fun dispose() {
+    running = false
+    removeCallbacks(ticker)
+    PoplurPerformanceManager.releaseHeavyRenderer(this)
+    PoplurPerformanceManager.removeObserver(this)
+    pieces.clear()
   }
 
   override fun onSizeChanged(width: Int, height: Int, oldWidth: Int, oldHeight: Int) {
@@ -99,7 +141,8 @@ class PoplurNativeConfettiView(context: ThemedReactContext) : View(context) {
 
   private fun rebuildPieces(width: Int, height: Int) {
     pieces.clear()
-    val count = 189
+    val density = minOf(requestedParticleDensity, PoplurPerformanceManager.particleDensityMultiplier)
+    val count = (189 * density).toInt()
     repeat(count) { index ->
       pieces.add(
         ConfettiPiece(
@@ -124,4 +167,33 @@ class PoplurNativeConfettiView(context: ThemedReactContext) : View(context) {
   }
 
   private fun dp(value: Float): Float = value * resources.displayMetrics.density
+
+  private fun frameDelayMillis(): Long {
+    val fps = minOf(requestedTargetFps, PoplurPerformanceManager.targetFramesPerSecond).coerceAtLeast(1)
+    return (1000L / fps).coerceAtLeast(1)
+  }
+
+  private fun applyPerformancePolicy() {
+    val shouldRun = isAttachedToWindow
+      && requestedActive
+      && visibility == VISIBLE
+      && windowVisibility == VISIBLE
+      && isShown
+      && PoplurPerformanceManager.particlesAllowed
+      && PoplurPerformanceManager.appActive
+    val granted = shouldRun && PoplurPerformanceManager.acquireHeavyRenderer(this, "native-confetti", true)
+    if (!granted) PoplurPerformanceManager.releaseHeavyRenderer(this)
+    val expectedCount = if (granted) {
+      (189 * minOf(requestedParticleDensity, PoplurPerformanceManager.particleDensityMultiplier)).toInt()
+    } else 0
+    if (expectedCount == 0) pieces.clear()
+    else if (width > 0 && height > 0 && pieces.size != expectedCount) rebuildPieces(width, height)
+    if (granted == running) return
+    running = granted
+    removeCallbacks(ticker)
+    if (running) {
+      lastFrameNanos = System.nanoTime()
+      postOnAnimation(ticker)
+    }
+  }
 }

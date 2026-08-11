@@ -29,6 +29,7 @@ import {
   PerformanceMonitor,
   ProfiledScreen,
 } from './src/performance/ScreenProfiler';
+import { PoplurPerformanceRuntime } from './src/performance/PoplurPerformance';
 
 // Web-only: the app's screens are designed for a phone's portrait aspect ratio,
 // so a wide desktop window collapses their vertical layout (text overlaps
@@ -129,17 +130,17 @@ export default function App() {
   if (__DEV__ && typeof window !== 'undefined'
     && new URLSearchParams(window.location.search).get('devAuth') === '1') {
     const wantNative = new URLSearchParams(window.location.search).get('native') === '1';
-    return <SafeAreaProvider><PerformanceMonitor /><NavigationContainer documentTitle={{ formatter: () => 'Poplur' }}><StatusBar style="light" />{wantNative ? <MainApp /> : <ProfiledScreen name="PostLoginHomeWebScreen"><PostLoginHomeWebScreen forcePermissionPrimer /></ProfiledScreen>}</NavigationContainer></SafeAreaProvider>;
+    return <SafeAreaProvider><PoplurPerformanceRuntime /><PerformanceMonitor /><NavigationContainer documentTitle={{ formatter: () => 'Poplur' }}><StatusBar style="light" />{wantNative ? <MainApp /> : <ProfiledScreen name="PostLoginHomeWebScreen"><PostLoginHomeWebScreen forcePermissionPrimer /></ProfiledScreen>}</NavigationContainer></SafeAreaProvider>;
   }
 
   if (user === undefined) {
-    return <SafeAreaProvider><PerformanceMonitor /><ProfiledScreen name="SplashScreen"><SplashScreen /></ProfiledScreen></SafeAreaProvider>;
+    return <SafeAreaProvider><PoplurPerformanceRuntime /><PerformanceMonitor /><ProfiledScreen name="SplashScreen"><SplashScreen /></ProfiledScreen></SafeAreaProvider>;
   }
 
   // Post-login parity with iOS/Android Phase 3: signed-in users get the approved
   // web home (clay-map ViewHarness ?view=home) instead of the native RN remake.
   // Flip USE_WEB_HOME to false to restore the native MainApp tabs.
-  return <SafeAreaProvider><PerformanceMonitor /><NavigationContainer documentTitle={{ formatter: () => 'Poplur' }}><StatusBar style="light" />{user ? (USE_WEB_HOME ? <ProfiledScreen name="PostLoginHomeWebScreen"><PostLoginHomeWebScreen skipPermissionPrimer={preloginPermissionsHandled} /></ProfiledScreen> : <MainApp />) : <AuthStack authError={authError} onPermissionSequenceHandled={() => setPreloginPermissionsHandled(true)} />}</NavigationContainer></SafeAreaProvider>;
+  return <SafeAreaProvider><PoplurPerformanceRuntime /><PerformanceMonitor /><NavigationContainer documentTitle={{ formatter: () => 'Poplur' }}><StatusBar style="light" />{user ? (USE_WEB_HOME ? <ProfiledScreen name="PostLoginHomeWebScreen"><PostLoginHomeWebScreen skipPermissionPrimer={preloginPermissionsHandled} /></ProfiledScreen> : <MainApp />) : <AuthStack authError={authError} onPermissionSequenceHandled={() => setPreloginPermissionsHandled(true)} />}</NavigationContainer></SafeAreaProvider>;
 }
 
 function AuthStack({ authError, onPermissionSequenceHandled }: {

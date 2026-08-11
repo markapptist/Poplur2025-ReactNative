@@ -4,6 +4,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { Video, ResizeMode } from 'expo-av';
 import { fetchRecentPosts, incrementPostView } from '../services/posts';
 import type { Post } from '../types/models';
+import { usePoplurHeavyRenderer, usePoplurPerformance } from '../performance/PoplurPerformance';
+import { PoplurPerformanceMode } from '../performance/PoplurPerformanceManager';
 
 const EARTH_RADIUS_KM = 6371;
 
@@ -13,6 +15,15 @@ export function FeedScreen() {
   const [activePostId, setActivePostId] = useState<string | null>(null);
   const viewedPosts = useRef(new Set<string>());
   const { height } = useWindowDimensions();
+  const performance = usePoplurPerformance();
+  const hasActiveVideo = posts.some(post => post.id === activePostId
+    && (post.mediaType.includes('video') || post.mediaURL.toLowerCase().includes('.mp4')));
+  const ownsVideoRenderer = usePoplurHeavyRenderer(
+    'feed-active-video',
+    hasActiveVideo,
+    { priority: 70, decorative: false },
+  );
+  const videoPlaybackAllowed = ownsVideoRenderer && performance.mode !== PoplurPerformanceMode.EMERGENCY;
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -63,7 +74,7 @@ export function FeedScreen() {
       data={posts}
       keyExtractor={item => item.id}
       renderItem={({ item, index }) => (
-        <FeedPost post={item} index={index} totalPosts={posts.length} height={height} active={item.id === activePostId} />
+        <FeedPost post={item} index={index} totalPosts={posts.length} height={height} active={videoPlaybackAllowed && item.id === activePostId} />
       )}
       pagingEnabled
       showsVerticalScrollIndicator={false}
@@ -90,7 +101,7 @@ function FeedPost({ post, index, totalPosts, height, active }: { post: Post; ind
 
   return (
     <View style={[styles.post, { height }]}>
-      {isVideo ? (
+      {isVideo && active ? (
         <Video
           source={{ uri: post.mediaURL }}
           style={styles.media}
@@ -98,7 +109,10 @@ function FeedPost({ post, index, totalPosts, height, active }: { post: Post; ind
           shouldPlay={active}
           isLooping
           isMuted={false}
+          progressUpdateIntervalMillis={1000}
         />
+      ) : isVideo ? (
+        <View style={styles.media} />
       ) : (
         <Image source={{ uri: post.mediaURL }} style={styles.media} resizeMode="cover" />
       )}

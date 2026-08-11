@@ -13,6 +13,7 @@ import {
 import { StatusBar } from 'expo-status-bar';
 import Svg, { Circle } from 'react-native-svg';
 import { PoplurConfetti } from '../components/PoplurConfetti';
+import { usePoplurPerformance } from '../performance/PoplurPerformance';
 
 const scallops = Array.from({ length: 15 });
 const welcomeLogo = require('../assets/welcome-logo.png');
@@ -110,6 +111,10 @@ function WelcomeCube() {
 
 function AnimatedWorldMap() {
   const [reduceMotion, setReduceMotion] = useState(false);
+  const performance = usePoplurPerformance();
+  const animationAllowed = performance.appState === 'active'
+    && performance.documentVisible
+    && performance.decorativeRenderingAllowed;
   const pulses = useRef([
     new Animated.Value(0.42),
     new Animated.Value(0.42),
@@ -131,7 +136,7 @@ function AnimatedWorldMap() {
   useEffect(() => {
     const animations = pulses.map((pulse, index) => {
       pulse.stopAnimation();
-      if (reduceMotion) {
+      if (reduceMotion || !animationAllowed) {
         pulse.setValue(0.72);
         return undefined;
       }
@@ -143,13 +148,13 @@ function AnimatedWorldMap() {
             toValue: 1,
             duration: 920,
             easing: Easing.inOut(Easing.sin),
-            useNativeDriver: false
+            useNativeDriver: true
           }),
           Animated.timing(pulse, {
             toValue: 0.3,
             duration: 920,
             easing: Easing.inOut(Easing.sin),
-            useNativeDriver: false
+            useNativeDriver: true
           }),
           Animated.delay((2 - index) * 310)
         ])
@@ -158,7 +163,7 @@ function AnimatedWorldMap() {
       return animation;
     });
     return () => animations.forEach(animation => animation?.stop());
-  }, [pulses, reduceMotion]);
+  }, [animationAllowed, pulses, reduceMotion]);
 
   return (
     <View

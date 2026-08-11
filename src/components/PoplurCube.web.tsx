@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as THREE from 'three';
 import type { AppTab } from '../types/models';
+import { usePoplurPerformance } from '../performance/PoplurPerformance';
 
 const tabs: AppTab[] = ['feed', 'map', 'record', 'profile', 'settings'];
 const icons: Record<AppTab, keyof typeof Ionicons.glyphMap> = {
@@ -54,6 +55,10 @@ export function PoplurCube({ activeTab, onTabChange }: { activeTab: AppTab; onTa
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const activeRef = useRef(activeTab);
   const dragStartRef = useRef<{ x: number; y: number } | null>(null);
+  const invalidateRef = useRef<(animate?: boolean) => void>(() => {});
+  const policy = usePoplurPerformance();
+  const performanceRef = useRef(policy);
+  performanceRef.current = policy;
 
   const textures = useMemo(() => [
     createFaceTexture('Map', '#4f46e5'),
@@ -66,7 +71,14 @@ export function PoplurCube({ activeTab, onTabChange }: { activeTab: AppTab; onTa
 
   useEffect(() => {
     activeRef.current = activeTab;
+    invalidateRef.current(true);
   }, [activeTab]);
+
+  useEffect(() => {
+    if (policy.appState === 'active' && policy.documentVisible) {
+      invalidateRef.current(true);
+    }
+  }, [policy.appState, policy.documentVisible, policy.mode, policy.targetFPS]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -81,8 +93,13 @@ export function PoplurCube({ activeTab, onTabChange }: { activeTab: AppTab; onTa
     const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 100);
     camera.position.set(0, 0.12, 5.2);
 
-    const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true, preserveDrawingBuffer: true });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    const renderer = new THREE.WebGLRenderer({
+      canvas,
+      alpha: true,
+      antialias: true,
+      powerPreference: performanceRef.current.mode === 'FULL' ? 'default' : 'low-power',
+    });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, performanceRef.current.maxDevicePixelRatio));
 
     const materials = textures.map(texture => new THREE.MeshStandardMaterial({ map: texture, roughness: 0.46, metalness: 0.12 }));
     const cube = new THREE.Mesh(new THREE.BoxGeometry(2.25, 2.25, 2.25), materials);
@@ -115,10 +132,20 @@ export function PoplurCube({ activeTab, onTabChange }: { activeTab: AppTab; onTa
     let width = 0;
     let height = 0;
     let animationFrame = 0;
+    let frameTimer: ReturnType<typeof setTimeout> | null = null;
+    let lastFrame = 0;
+    let stopped = false;
+    let animating = true;
+    let currentPixelRatio = renderer.getPixelRatio();
 
     function resize() {
       const nextWidth = Math.max(sceneHost.clientWidth, 1);
       const nextHeight = Math.max(sceneHost.clientHeight, 1);
+      const nextPixelRatio = Math.min(window.devicePixelRatio, performanceRef.current.maxDevicePixelRatio);
+      if (nextPixelRatio !== currentPixelRatio) {
+        currentPixelRatio = nextPixelRatio;
+        renderer.setPixelRatio(currentPixelRatio);
+      }
       if (nextWidth === width && nextHeight === height) return;
       width = nextWidth;
       height = nextHeight;
@@ -127,13 +154,37 @@ export function PoplurCube({ activeTab, onTabChange }: { activeTab: AppTab; onTa
       renderer.setSize(width, height, false);
     }
 
-    function animate() {
+    function scheduleFrame() {
+      if (stopped || animationFrame || frameTimer) return;
+      const policy = performanceRef.current;
+      if (policy.appState !== 'active' || !policy.documentVisible) return;
+      const delay = Math.max(0, 1000 / policy.targetFPS - (performance.now() - lastFrame));
+      frameTimer = setTimeout(() => {
+        frameTimer = null;
+        animationFrame = window.requestAnimationFrame(renderFrame);
+      }, delay);
+    }
+
+    function renderFrame(now: number) {
+      animationFrame = 0;
+      if (stopped) return;
       resize();
       const target = rotations[activeRef.current] ?? rotations.feed;
-      cube.rotation.x += (target.x - cube.rotation.x) * 0.12;
-      cube.rotation.y += (target.y - cube.rotation.y) * 0.12;
+      if (animating) {
+        cube.rotation.x += (target.x - cube.rotation.x) * 0.24;
+        cube.rotation.y += (target.y - cube.rotation.y) * 0.24;
+      }
       renderer.render(scene, camera);
-      animationFrame = window.requestAnimationFrame(animate);
+      lastFrame = now;
+      const unsettled = Math.abs(target.x - cube.rotation.x) > 0.001
+        || Math.abs(target.y - cube.rotation.y) > 0.001;
+      animating = animating && unsettled;
+      if (animating) scheduleFrame();
+    }
+
+    function invalidate(animate = false) {
+      animating = animating || animate;
+      scheduleFrame();
     }
 
     function chooseFace(clientX: number, clientY: number) {
@@ -165,21 +216,29 @@ export function PoplurCube({ activeTab, onTabChange }: { activeTab: AppTab; onTa
       }
     }
 
-    animate();
-    const observer = new ResizeObserver(resize);
+    invalidateRef.current = invalidate;
+    invalidate(true);
+    const observer = new ResizeObserver(() => invalidate(false));
     observer.observe(sceneHost);
     sceneCanvas.addEventListener('pointerdown', pointerDown);
     sceneCanvas.addEventListener('pointerup', pointerUp);
 
     return () => {
+      stopped = true;
+      invalidateRef.current = () => {};
       window.cancelAnimationFrame(animationFrame);
+      if (frameTimer) clearTimeout(frameTimer);
       observer.disconnect();
       sceneCanvas.removeEventListener('pointerdown', pointerDown);
       sceneCanvas.removeEventListener('pointerup', pointerUp);
       renderer.dispose();
+      renderer.renderLists.dispose();
+      renderer.forceContextLoss();
       cube.geometry.dispose();
       edges.geometry.dispose();
+      (edges.material as THREE.Material).dispose();
       floor.geometry.dispose();
+      (floor.material as THREE.Material).dispose();
       materials.forEach(material => material.dispose());
     };
   }, [onTabChange, textures]);

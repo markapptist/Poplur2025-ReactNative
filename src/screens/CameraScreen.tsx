@@ -4,6 +4,8 @@ import { CameraView, CameraType, useCameraPermissions, useMicrophonePermissions 
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
 import { uploadPostMedia } from '../services/posts';
+import { usePoplurHeavyRenderer, usePoplurPerformance } from '../performance/PoplurPerformance';
+import { PoplurPerformanceMode } from '../performance/PoplurPerformanceManager';
 
 export function CameraScreen() {
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
@@ -15,17 +17,33 @@ export function CameraScreen() {
   const [previewUri, setPreviewUri] = useState<string | null>(null);
   const [previewType, setPreviewType] = useState<'photo' | 'video'>('photo');
   const [uploading, setUploading] = useState(false);
+  const performance = usePoplurPerformance();
+  const cameraAvailable = cameraPermission?.granted === true && micPermission?.granted === true;
+  const ownsCamera = usePoplurHeavyRenderer(
+    'camera-capture-session',
+    cameraAvailable,
+    { priority: 110, decorative: false },
+  );
 
-  if (!cameraPermission?.granted || !micPermission?.granted) {
+  React.useEffect(() => {
+    if (ownsCamera) return;
+    cameraRef.current?.stopRecording();
+    setRecording(false);
+    setTorch(false);
+  }, [ownsCamera]);
+
+  if (!cameraAvailable) {
     return <View style={styles.permission}><Text style={styles.title}>Camera access needed</Text><Text style={styles.copy}>Poplur uses the camera like the iOS CameraKit screen.</Text><Pressable style={styles.button} onPress={() => { requestCameraPermission(); requestMicPermission(); }}><Text style={styles.buttonText}>Grant permissions</Text></Pressable></View>;
   }
 
   async function takePhoto() {
+    if (!ownsCamera) return;
     const photo = await cameraRef.current?.takePictureAsync({ quality: 0.86 });
     if (photo?.uri) { setPreviewUri(photo.uri); setPreviewType('photo'); }
   }
 
   async function toggleRecord() {
+    if (!ownsCamera && !recording) return;
     if (recording) { cameraRef.current?.stopRecording(); setRecording(false); return; }
     setRecording(true);
     try {
@@ -49,7 +67,17 @@ export function CameraScreen() {
   }
 
   return <View style={styles.fill}>
-    <CameraView ref={cameraRef} style={styles.fill} facing={facing} enableTorch={torch} mode="video" />
+    {ownsCamera ? (
+      <CameraView
+        ref={cameraRef}
+        style={styles.fill}
+        facing={facing}
+        enableTorch={torch}
+        mode="video"
+        active={ownsCamera}
+        videoQuality={performance.mode === PoplurPerformanceMode.FULL ? '1080p' : performance.mode === PoplurPerformanceMode.EMERGENCY ? '480p' : '720p'}
+      />
+    ) : <View style={styles.fill} />}
     <View style={styles.scanFrame}><Text style={styles.scanText}>Scanning…</Text></View>
     {previewUri && <View style={styles.preview}><Image source={{ uri: previewUri }} style={styles.previewImage} /><Pressable style={styles.previewClose} onPress={() => setPreviewUri(null)}><Ionicons name="close" color="white" size={22} /></Pressable></View>}
     <View style={styles.topBar}>

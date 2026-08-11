@@ -1,5 +1,6 @@
 import React, { Profiler, useEffect, useRef } from 'react';
-import { Platform } from 'react-native';
+import { AppState, Platform } from 'react-native';
+import { poplurPerformanceManager } from './PoplurPerformanceManager';
 
 type ScreenSample = {
   commits: number;
@@ -79,7 +80,9 @@ function startMonitors() {
 
   let frameHandle: number | null = null;
   let lastFrame = now();
+  let monitoringFrames = false;
   const onFrame = (timestamp: number) => {
+    if (!monitoringFrames) return;
     const duration = timestamp - lastFrame;
     lastFrame = timestamp;
     if (duration > 32) {
@@ -88,13 +91,33 @@ function startMonitors() {
     }
     frameHandle = requestAnimationFrame(onFrame);
   };
-  if (typeof requestAnimationFrame === 'function') {
+
+  const startFrames = () => {
+    if (monitoringFrames || typeof requestAnimationFrame !== 'function') return;
+    monitoringFrames = true;
+    lastFrame = now();
     frameHandle = requestAnimationFrame(onFrame);
-  }
+  };
+  const stopFrames = () => {
+    monitoringFrames = false;
+    if (frameHandle !== null && typeof cancelAnimationFrame === 'function') {
+      cancelAnimationFrame(frameHandle);
+      frameHandle = null;
+    }
+  };
+  if (AppState.currentState === 'active') startFrames();
+  const appStateSubscription = AppState.addEventListener('change', state => {
+    if (state === 'active') startFrames();
+    else stopFrames();
+  });
 
   const intervalMs = 250;
   let expected = now() + intervalMs;
-  const stallTimer = setInterval(() => {
+  let stallTimer: ReturnType<typeof setInterval> | null = null;
+  const startStalls = () => {
+    if (stallTimer) return;
+    expected = now() + intervalMs;
+    stallTimer = setInterval(() => {
     const current = now();
     const drift = current - expected;
     expected = current + intervalMs;
@@ -102,13 +125,24 @@ function startMonitors() {
       jsStalls += 1;
       maxJsStallMs = Math.max(maxJsStallMs, drift);
     }
-  }, intervalMs);
+    }, intervalMs);
+  };
+  const stopStalls = () => {
+    if (!stallTimer) return;
+    clearInterval(stallTimer);
+    stallTimer = null;
+  };
+  if (AppState.currentState === 'active') startStalls();
+  const frameAndStallSubscription = AppState.addEventListener('change', state => {
+    if (state === 'active') startStalls();
+    else stopStalls();
+  });
 
   return () => {
-    if (frameHandle !== null && typeof cancelAnimationFrame === 'function') {
-      cancelAnimationFrame(frameHandle);
-    }
-    clearInterval(stallTimer);
+    stopFrames();
+    appStateSubscription.remove();
+    frameAndStallSubscription.remove();
+    stopStalls();
     monitorsStarted = false;
   };
 }
@@ -150,6 +184,14 @@ export function ProfiledScreen({
   children: React.ReactNode;
 }) {
   const firstCommit = useRef(true);
+  useEffect(() => {
+    poplurPerformanceManager.setCurrentScreen(name);
+    return () => {
+      if (poplurPerformanceManager.getSnapshot().currentScreen === name) {
+        poplurPerformanceManager.setCurrentScreen(null);
+      }
+    };
+  }, [name]);
   if (!enabled) return <>{children}</>;
 
   return (

@@ -19,6 +19,7 @@
       "bundleIdentifier": "com.apptist.Poplur2025.reactnative",
       "supportsTablet": true,
       "infoPlist": {
+        "CADisableMinimumFrameDurationOnPhone": false,
         "NSCameraUsageDescription": "Poplur needs camera access so you can record location-based posts.",
         "NSMicrophoneUsageDescription": "Poplur uses the microphone for Hey Poplur voice commands and to record videos.",
         "NSSpeechRecognitionUsageDescription": "Poplur uses speech recognition to listen for Hey Poplur voice commands while Home is open.",
