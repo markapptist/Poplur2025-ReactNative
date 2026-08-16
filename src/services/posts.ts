@@ -13,8 +13,13 @@ export async function fetchRecentPosts(max = 40): Promise<Post[]> {
 }
 
 export async function fetchMyPosts(uid: string): Promise<Post[]> {
-  const snap = await getDocs(query(postsCollection, where('userID', '==', uid), orderBy('createdAt', 'desc')));
-  return snap.docs.map(toPost);
+  // Keep the profile working without a composite userID+createdAt index and
+  // bound retained metadata on long-lived accounts. Native shells use the same
+  // 64-post window and sort the small page locally.
+  const snap = await getDocs(query(postsCollection, where('userID', '==', uid), limit(64)));
+  return snap.docs
+    .map(toPost)
+    .sort((a, b) => (b.createdAt?.getTime() ?? 0) - (a.createdAt?.getTime() ?? 0));
 }
 
 export async function incrementPostView(post: Post) {
@@ -138,6 +143,9 @@ function toPost(document: any): Post {
     username: data.username,
     mediaURL: data.mediaURL ?? '',
     mediaType: data.mediaType ?? 'photo',
+    posterURL: data.posterURL,
+    caption: data.caption,
+    channelId: data.channelId,
     latitude: numberOrUndefined(data.latitude),
     longitude: numberOrUndefined(data.longitude),
     radius: Number(data.radius ?? 5000),

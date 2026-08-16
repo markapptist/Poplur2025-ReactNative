@@ -4,6 +4,7 @@ import { Asset } from 'expo-asset';
 import * as FileSystem from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
+import { DeviceMotion } from 'expo-sensors';
 import * as WebBrowser from 'expo-web-browser';
 import { StatusBar } from 'expo-status-bar';
 import Server from '@dr.pogodin/react-native-static-server';
@@ -11,7 +12,8 @@ import { unzip } from 'react-native-zip-archive';
 import WebView, { WebViewMessageEvent } from 'react-native-webview';
 import { PreloginWebScreen } from './PreloginWebScreen';
 import { getCurrentProfile } from '../services/profile';
-import { uploadPostMedia } from '../services/posts';
+import { fetchMyPosts, uploadPostMedia } from '../services/posts';
+import { auth } from '../services/firebase';
 import {
   getHandledPermissionPrimers,
   markPermissionPrimerHandled,
@@ -29,6 +31,7 @@ import {
   thermalStateForMode,
   webPerformanceMessage,
 } from '../performance/PoplurPerformanceManager';
+import { initializeFeedGoogleAds, presentFeedGoogleAd } from '../services/feedAds';
 
 // Post-login HOME web embed (RN parity with iOS/Android Phase 3).
 //
@@ -47,7 +50,7 @@ import {
 // homeReady).
 
 // Bump when the staged claymap.zip changes so devices re-extract.
-const BUNDLE_VERSION = '90';
+const BUNDLE_VERSION = '91';
 
 const CLAYMAP_ZIP = require('../assets/claymap/claymap.zip');
 const WEB_HOME_ORIGIN = 'http://127.0.0.1:5173';
@@ -109,6 +112,8 @@ type ClayMessage = {
   latitude?: number;
   longitude?: number;
   radiusKm?: number;
+  index?: number;
+  sequence?: number;
   control?: string;
   scope?: 'once' | 'whileUsing';
   permission?: PrimerPermission;
@@ -195,6 +200,7 @@ export function PostLoginHomeWebScreen({
   const pendingNativeVoiceCommandRef = useRef<NativeVoiceCommand | null>(null);
   const inAppBrowserOpenRef = useRef(false);
   const cameraLiveVisibleRef = useRef(false);
+  const feedAdSequenceRef = useRef(0);
   const performance = usePoplurPerformance();
   const ownsHeavyRenderer = usePoplurHeavyRenderer(
     'postlogin-web-home',
@@ -229,6 +235,11 @@ export function PostLoginHomeWebScreen({
   useEffect(() => {
     pushPerformancePolicy();
   }, [pushPerformancePolicy]);
+
+  useEffect(() => {
+    void initializeFeedGoogleAds().catch(error =>
+      console.warn('[PostLoginHomeWebScreen] Google Mobile Ads init failed', error));
+  }, []);
 
   useEffect(() => () => {
     cameraLiveVisibleRef.current = false;
@@ -344,6 +355,79 @@ export function PostLoginHomeWebScreen({
       `window.dispatchEvent(new CustomEvent(${name}, { detail: ${payload} })); true;`,
     );
   }, []);
+
+  useEffect(() => {
+    // iOS and Android native shells both advertise PoplurNative, so the web
+    // navigator intentionally waits for a native `poplur-native-motion`
+    // stream instead of subscribing to browser deviceorientation. RN used to
+    // provide the shell without that stream, leaving every model — including
+    // the Phone — static. Keep exactly one 30 Hz foreground subscription and
+    // let CubeTab3D perform the display-rate interpolation for all models.
+    if (Platform.OS === 'web'
+      || !homeReady
+      || !ownsHeavyRenderer
+      || performance.appState !== 'active'
+      || !performance.documentVisible) return;
+
+    let cancelled = false;
+    let subscription: { remove: () => void } | null = null;
+    let lastRoll = Number.NaN;
+    let lastPitch = Number.NaN;
+
+    DeviceMotion.setUpdateInterval(1000 / 30);
+    void DeviceMotion.isAvailableAsync().then(available => {
+      if (!available || cancelled) return;
+      subscription = DeviceMotion.addListener(sample => {
+        if (cancelled) return;
+        const roll = sample.rotation?.gamma;
+        const pitch = sample.rotation?.beta;
+        if (!Number.isFinite(roll) || !Number.isFinite(pitch)) return;
+        // Drop sensor noise while the handset rests. A real tilt is many times
+        // this threshold, and each accepted sample wakes only the one visible
+        // navigator renderer.
+        if (Number.isFinite(lastRoll)
+          && Math.abs(roll - lastRoll) < 0.008
+          && Math.abs(pitch - lastPitch) < 0.008) return;
+        lastRoll = roll;
+        lastPitch = pitch;
+        dispatchToClay('poplur-native-motion', { roll, pitch });
+      });
+    }).catch(error => {
+      if (!cancelled) console.warn('[PostLoginHomeWebScreen] cube motion unavailable', error);
+    });
+
+    return () => {
+      cancelled = true;
+      subscription?.remove();
+    };
+  }, [
+    dispatchToClay,
+    homeReady,
+    ownsHeavyRenderer,
+    performance.appState,
+    performance.documentVisible,
+  ]);
+
+  const sendProfilePostsToWeb = useCallback(async () => {
+    const uid = auth.currentUser?.uid;
+    if (!uid) return;
+    try {
+      const posts = await fetchMyPosts(uid);
+      dispatchToClay('poplur-native-profile-posts', {
+        posts: posts.slice(0, 64).map(post => ({
+          id: post.id,
+          mediaURL: post.mediaURL,
+          mediaType: post.mediaType,
+          posterURL: post.posterURL,
+          caption: post.caption,
+          channelId: post.channelId,
+          createdAtMillis: post.createdAt?.getTime?.() ?? 0,
+        })),
+      });
+    } catch (error) {
+      console.warn('[PostLoginHomeWebScreen] profile posts bridge failed', error);
+    }
+  }, [dispatchToClay]);
 
   const deliverNativeVoiceCommand = useCallback((command: NativeVoiceCommand) => {
     if (!homeReadyRef.current) {
@@ -545,6 +629,7 @@ export function PostLoginHomeWebScreen({
       const message = JSON.parse(event.nativeEvent.data) as ClayMessage;
       if (message.type === 'homeReady' || message.type === 'mapReady') markHomeReady();
       if (message.type === 'requestProfile') void sendProfileToWeb();
+      if (message.type === 'requestProfilePosts') void sendProfilePostsToWeb();
       if (message.type === 'openInAppBrowser') void openInAppBrowser(message.url);
       if (message.type === 'requestVoiceAssistant') {
         // This message is emitted only by the visible HEY POPLUR tile. Home
@@ -572,6 +657,17 @@ export function PostLoginHomeWebScreen({
       }
       if (message.type === 'cameraLiveVisibilityChanged') {
         cameraLiveVisibleRef.current = message.visible === true;
+      }
+      if (message.type === 'feedContentAdvanced') {
+        const sequence = Number.isFinite(message.sequence)
+          ? Number(message.sequence)
+          : ++feedAdSequenceRef.current;
+        feedAdSequenceRef.current = Math.max(feedAdSequenceRef.current, sequence);
+        if (sequence > 0 && sequence % 3 === 0) {
+          presentFeedGoogleAd(open => {
+            dispatchToClay('poplur-native-feed-ad', { open });
+          });
+        }
       }
       if (message.type === 'cameraShutter' && cameraLiveVisibleRef.current) {
         void pickCapture('camera', 'photo').catch(error => console.warn('[PostLoginHomeWebScreen] camera capture failed', error));

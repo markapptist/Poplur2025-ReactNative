@@ -6,6 +6,9 @@ export type Post = {
   username?: string;
   mediaURL: string;
   mediaType: 'photo' | 'video' | 'photo_profile' | 'video_profile' | string;
+  posterURL?: string;
+  caption?: string;
+  channelId?: string;
   latitude?: number;
   longitude?: number;
   radius: number;

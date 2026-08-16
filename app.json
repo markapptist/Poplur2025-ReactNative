@@ -45,6 +45,13 @@
           "microphonePermission": "Poplur uses the microphone for Hey Poplur voice commands and to record videos.",
           "speechRecognitionPermission": "Poplur uses speech recognition to listen for Hey Poplur voice commands while Home is open."
         }
+      ],
+      [
+        "react-native-google-mobile-ads",
+        {
+          "androidAppId": "ca-app-pub-2086359936541081~4441297400",
+          "iosAppId": "ca-app-pub-2086359936541081~4441297400"
+        }
       ]
     ],
     "extra": {
