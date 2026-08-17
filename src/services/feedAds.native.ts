@@ -1,7 +1,6 @@
 import mobileAds, {
   AdEventType,
   InterstitialAd,
-  TestIds,
 } from 'react-native-google-mobile-ads';
 
 const PRODUCTION_INTERSTITIAL_UNIT_ID = 'ca-app-pub-2086359936541081/6696033455';
@@ -24,7 +23,7 @@ function createInterstitial() {
   loaded = false;
   loading = false;
   interstitial = InterstitialAd.createForAdRequest(
-    __DEV__ ? TestIds.INTERSTITIAL : PRODUCTION_INTERSTITIAL_UNIT_ID,
+    PRODUCTION_INTERSTITIAL_UNIT_ID,
     { requestNonPersonalizedAdsOnly: true },
   );
   unsubscribe = [
