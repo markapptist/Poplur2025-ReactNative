@@ -18,6 +18,11 @@ export type NativeVoiceCommand = {
 const WAKE_WINDOW_MS = 6_000;
 const DUPLICATE_WINDOW_MS = 1_200;
 const RESTART_DELAY_MS = 320;
+// Parity with the iOS shell: 45s without a wake or a command disarms the
+// recognizer entirely. Always-on continuous recognition is the exact
+// configuration iOS measured (WebHomeCameraLayer) at roughly half feed
+// framerate plus device overheating, and removed.
+const IDLE_DISARM_MS = 45_000;
 
 function normalizeTranscript(value: string) {
   let normalized = value
@@ -93,6 +98,11 @@ export function useNativeVoiceAssistant({
   const lastTranscriptRef = useRef({ text: '', at: 0 });
   const commandSequenceRef = useRef(0);
   const desiredListeningRef = useRef(false);
+  // Set only by the explicit HEY POPLUR press, cleared by the idle disarm.
+  // A previously granted OS permission must never re-arm the microphone on
+  // a plain Home mount or an app-foreground.
+  const explicitlyArmedRef = useRef(false);
+  const lastMeaningfulAtRef = useRef(0);
   const recognitionRunningRef = useRef(false);
   const recognitionStartingRef = useRef(false);
   const speechRunningRef = useRef(false);
@@ -115,6 +125,7 @@ export function useNativeVoiceAssistant({
     const wake = transcript.match(/\b(?:hey|hay)\s+(?:poplur|populr)\b\s*(.*)$/);
     let commandText = '';
     if (wake) {
+      lastMeaningfulAtRef.current = now;
       awaitingCommandUntilRef.current = now + WAKE_WINDOW_MS;
       commandText = wake[1]?.trim() ?? '';
     } else if (now < awaitingCommandUntilRef.current) {
@@ -192,6 +203,19 @@ export function useNativeVoiceAssistant({
 
   const scheduleRestart = useCallback((delay = RESTART_DELAY_MS) => {
     clearRestartTimer();
+    // The continuous session cycles through end/restart every few seconds,
+    // so this guard IS the idle disarm: no wake and no command for 45s means
+    // the next cycle simply does not restart, and the mic returns to the OS
+    // until the next explicit HEY POPLUR press.
+    if (
+      explicitlyArmedRef.current
+      && lastMeaningfulAtRef.current > 0
+      && Date.now() - lastMeaningfulAtRef.current > IDLE_DISARM_MS
+    ) {
+      explicitlyArmedRef.current = false;
+      desiredListeningRef.current = false;
+      return;
+    }
     if (
       !desiredListeningRef.current
       || speechRunningRef.current
@@ -205,6 +229,10 @@ export function useNativeVoiceAssistant({
 
   const startIfAuthorized = useCallback(async () => {
     if (!enabled || Platform.OS === 'web') return false;
+    // Resume-only: this path re-establishes a session the user explicitly
+    // armed and then backgrounded. It never arms from a mount — permission
+    // being granted is not consent to listen.
+    if (!explicitlyArmedRef.current) return false;
     const permission = await ExpoSpeechRecognitionModule.getPermissionsAsync();
     if (!homeMountedRef.current || !permission.granted) {
       desiredListeningRef.current = false;
@@ -330,6 +358,8 @@ export function useNativeVoiceAssistant({
     // The user may spend longer than the command window reading the system
     // sheet. Start a fresh window only after the explicit grant returns.
     awaitingCommandUntilRef.current = Date.now() + WAKE_WINDOW_MS;
+    explicitlyArmedRef.current = true;
+    lastMeaningfulAtRef.current = Date.now();
     desiredListeningRef.current = true;
     startRecognition();
     return true;
