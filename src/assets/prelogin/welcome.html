@@ -112,7 +112,7 @@
     display: block;
     position: absolute;
     top: calc(env(safe-area-inset-top, 0px) + clamp(12px, 3cqw, 20px));
-    right: calc(env(safe-area-inset-right, 0px) + clamp(12px, 3cqw, 20px)); z-index: 60;
+    right: calc(env(safe-area-inset-right, 0px) + clamp(12px, 3cqw, 20px)); z-index: 61;
     appearance: none; background: none; border: 0; padding: 6px; cursor: pointer; line-height: 0; }
   html.poplur-colorlab .hueBtn:active { transform: scale(0.9); }
   /* The map's takeover picker, brought over so the two colour controls in the
@@ -214,7 +214,8 @@
      stepping onto the pane interpolates rather than jumping.
      flex-start rather than centred: the stack scrolls, and a centred overflow
      clips at BOTH ends, which is what was eating the button. */
-  .phone.introPane .cubeStage.risen { top: 26.5%; transform: translate(-50%, -50%) scale(0.5); }
+  .phone.introPane .wLogoWrap { display: none; }
+  .phone.introPane .cubeStage.risen { top: 17%; transform: translate(-50%, -50%) scale(0.5); }
   .phone.introPane #paneAccountIntro .formStack { top: 33%; justify-content: flex-start; }
 
   /* Cream extruded clay type — chunky rounded letterforms, soft top light,
@@ -449,10 +450,11 @@
      the same object as the card you just picked — the Mark head for personal,
      the building for business — so the step reads as a continuation of that
      choice rather than a new subject. */
-  .introArt { width: 96px; height: 96px; margin: 0 auto 2px; position: relative; }
+  .introArt { width: 124px; height: 124px; margin: 0 auto 2px; position: relative; }
   .introArt canvas { width: 100%; height: 100%; display: block; }
+  .introArt .account-3d-icon { flex: 0 0 auto; width: 100%; height: 100%; border-radius: 26px; }
   .introList { display: flex; flex-direction: column; gap: 9px; width: min(268px, 82cqw);
-    margin: 2px auto 0; text-align: left; }
+    margin: 2px auto 0; text-align: center; }
   /* No bullets — the copy carries itself. Type matches .stackSub, the body face
      used everywhere else in pre-login: .introItem was the one text class on this
      page that never declared a font-family, so it fell back to the -apple-system
