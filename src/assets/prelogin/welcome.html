@@ -215,7 +215,7 @@
      flex-start rather than centred: the stack scrolls, and a centred overflow
      clips at BOTH ends, which is what was eating the button. */
   .phone.introPane .wLogoWrap { display: none; }
-  .phone.introPane .cubeStage.risen { top: 17%; transform: translate(-50%, -50%) scale(0.5); }
+  .phone.introPane .cubeStage.risen { top: 13%; transform: translate(-50%, -50%) scale(0.4); }
   .phone.introPane #paneAccountIntro .formStack { top: 33%; justify-content: flex-start; }
 
   /* Cream extruded clay type — chunky rounded letterforms, soft top light,
@@ -1273,7 +1273,14 @@
       var gap = Math.max(14, (btnsTop - logoB - cubeH - textH) / 3)
       var cubeTop = logoB + gap + cubeH / 2
       var textTop = logoB + gap + cubeH + gap
-      if (stage.classList.contains('risen')) stage.style.top = cubeTop + 'px'
+      // The explainer pane is the one screen that positions the cube from CSS
+      // (`.phone.introPane .cubeStage.risen`) rather than from this measured
+      // layout, because it needs a smaller, higher cube than the welcome does.
+      // An inline `top` written here outranks that rule — which is exactly what
+      // dropped the cube back down into the stack and left the account art
+      // sitting on top of it. Hand the pane back to its stylesheet instead.
+      if (document.querySelector('.phone.introPane')) stage.style.removeProperty('top')
+      else if (stage.classList.contains('risen')) stage.style.top = cubeTop + 'px'
       clayHeadEl.style.top = textTop + 'px'
       claySubEl.style.top = (textTop + headH + innerGap) + 'px'
       aiText.style.top = (textTop + headH + innerGap + subH + innerGap) + 'px'
