@@ -12,6 +12,14 @@
 </style>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
+  /* No text selection outside real text entry. A long-press anywhere in the
+     native shell must not raise the blue selection highlight, the drag handles
+     or the iOS callout/magnifier — that chrome instantly breaks the illusion
+     that this is an app. Same base rule the post-login bundle uses
+     (poplur-clay-map/src/index.css); `user-select` inherits, so one declaration
+     on the root covers every screen in the flow. The sign-in / sign-up fields
+     are exempted below: you must still be able to place a caret, select, and
+     use the callout inside a field you are typing in. */
   html, body {
     -webkit-user-select: none;
     user-select: none;
@@ -22,7 +30,6 @@
     user-select: text;
     -webkit-touch-callout: default;
   }
-
   :root {
     --ground: #17131a;
     --ground-glow: rgba(246, 59, 154, 0.16);
@@ -45,8 +52,13 @@
     position: relative; width: 430px; height: 932px; overflow: hidden;
     border-radius: 48px; background: #050407;
     box-shadow: 0 0 0 10px #101014, 0 0 0 12px #2a2a30, 0 34px 80px rgba(0,0,0,0.5);
-    /* Query container so type + controls scale to the actual device width
-       (cqw = 1% of the phone's width) rather than a fixed design size. */
+    /* Query container so type + controls scale to the actual device box
+       (cqw = 1% of width, cqh = 1% of height) rather than a fixed design size.
+       `size`, not `inline-size`: the screens position off the block axis too,
+       and inline-size establishes an inline-axis container only, so cqh would
+       silently fall back to the viewport. Safe here — .phone never sizes from
+       its contents (430x932 standalone, 100%/100% of the fixed .phoneWrap in
+       the shell adaptation above), so its box is definite in both contexts. */
     container-type: size;
   }
   .island {
@@ -101,12 +113,21 @@
     filter: drop-shadow(0 2px 4px rgba(90, 0, 40, 0.5)); }
   .muteBtn:active { transform: scale(0.9); }
 
-  /* ── Colour lab (DEV ONLY) ───────────────────────────────────────────────
-     Hidden unless explicitly switched on: ?colorlab=1 once, or
-     __poplurColorLab(true) from a console. Customers never see it.
+  /* ── Colour orb ──────────────────────────────────────────────────────────
+     Ships to customers: pressing it randomises the background within the
+     brand's pink range. `?colorlab=0` (or __poplurColorLab(false)) is kept as
+     a kill switch, so the .poplur-colorlab class below is now present by
+     default instead of only on an explicit opt-in.
      Geometry is a deliberate mirror of .muteBtn — same top, same padding,
-     same z-index, same shadow, `right` swapped for `left` — so the two read
-     as one pair across the top of the screen rather than two near-matches. */
+     same shadow, `right` swapped for `left` — so the two read as one pair
+     across the top of the screen rather than two near-matches.
+     The one deliberate difference is the z-index: 61 here against .muteBtn's
+     60. .glassOverlay is also 60 and covers the screen with pointer-events
+     when `.on`, and an equal z-index is resolved by DOM order — so the
+     permission windows (which raise it 3.4s after load and hold it until BOTH
+     the location and camera asks are answered) swallowed every tap on the orb.
+     One above keeps it usable while judging those screens. Visually identical
+     either way: the two buttons never overlap. .muteBtn still has this. */
   .hueBtn { display: none; }
   html.poplur-colorlab .hueBtn {
     display: block;
@@ -183,10 +204,10 @@
     background:
       linear-gradient(135deg, rgba(255,255,255,0.66) 0%, rgba(255,255,255,0) 58%),
       linear-gradient(105deg, #fff 0%, #fff 28%, #ffeef8 54%, #e2e0e7 100%);
-    border: 1.5px solid rgba(0,0,0,0.10);
+    border: 2.5px solid var(--poplur-bg, #ff2d96);
     color: #000; font-family: "Avenir Next", "AvenirNext-Heavy", system-ui, sans-serif; font-weight: 900; font-size: 22px;
     text-shadow: 0 1px 1px rgba(0,0,0,0.16);
-    cursor: pointer; box-shadow: 0 6px 0 rgba(0,0,0,0.18); transition: transform 0.08s;
+    cursor: pointer; box-shadow: 0 6px 0 rgba(0,0,0,0.18), 0 0 18px color-mix(in srgb, var(--poplur-bg, #ff2d96) 55%, transparent); transition: transform 0.08s;
     animation: btnIn 0.5s ease both 1.3s;
   }
   .cap-btn:active { transform: scale(0.96); }
@@ -214,9 +235,28 @@
      stepping onto the pane interpolates rather than jumping.
      flex-start rather than centred: the stack scrolls, and a centred overflow
      clips at BOTH ends, which is what was eating the button. */
+  /* The explainer is the one pane where the logo and the cube compete: the
+     cube rises to 20.5% and the logo sits at 58-92px, so they occupy the same
+     band and whichever paints second cuts into the other. The cube is the
+     back button and has to stay readable, so the logo steps aside here rather
+     than being stacked above or below it. Every other pane keeps it. */
   .phone.introPane .wLogoWrap { display: none; }
+  /* Raised from 20.5% now the logo no longer occupies this pane: with the top
+     band free the cube can sit where the logo used to, which also opens the
+     gap between it and the account image below. */
   .phone.introPane .cubeStage.risen { top: 13%; transform: translate(-50%, -50%) scale(0.4); }
-  .phone.introPane #paneAccountIntro .formStack { top: 33%; justify-content: flex-start; }
+  .phone.introPane #paneAccountIntro .formStack { top: 20%; justify-content: flex-start; }
+  /* The button is the end of the page, so it sits at the end of the page.
+     `margin-top: auto` claims only space that is genuinely free: on a short
+     screen the stack overflows and the button flows normally right after the
+     copy, which is the case `flex-start` above exists for. Measured before
+     this: the Next button ended 147px above the bottom of an 852px screen,
+     with nothing under it — it read as floating mid-page. */
+  .phone.introPane #introNext { margin-top: auto; margin-bottom: clamp(4px, 1.6cqh, 16px); }
+  /* The account art belongs to the copy, not to the cube. It used to collide
+     with it — see the inline-top note in computeLayout — so give it a little
+     air on both sides now that the two are genuinely separate objects. */
+  .phone.introPane .introArt { margin-top: clamp(6px, 1.8cqh, 18px); margin-bottom: clamp(8px, 2.2cqh, 20px); }
 
   /* Cream extruded clay type — chunky rounded letterforms, soft top light,
      pressed pink under-shadow */
@@ -352,7 +392,7 @@
   .permission-location::after{content:"";position:absolute;left:16px;top:11px;width:9px;height:9px;border:3.5px solid #f6ecd7;border-radius:50%;background:rgba(255,255,255,.15);box-shadow:0 1px 2px rgba(83,0,43,.28)}
   .permission-title{margin:0 0 7px;font-size:15px;font-weight:900;line-height:1.18;letter-spacing:0}
   .permission-copy{margin:0;color:#6f5867;font-size:10px;font-weight:700;line-height:1.42;letter-spacing:0}
-  .permission-shader{color:transparent;background-image:linear-gradient(105deg,#25131f 0%,#8b214f 22%,#ff6cad 42%,#173f58 62%,#35c8ef 78%,#25131f 100%);background-size:260% 100%;background-position:0 0;background-clip:text;-webkit-background-clip:text;-webkit-text-fill-color:transparent;text-shadow:0 0 7px rgba(255,84,166,.12),0 0 10px rgba(53,200,239,.08);animation:permissionTextShader 4.8s linear infinite}
+  .permission-shader{color:transparent;background-image:linear-gradient(105deg,#25131f 0%,#8b214f 22%,#ff6cad 42%,#173f58 62%,#35c8ef 78%,#25131f 100%);background-size:260% 100%;background-position:0 0;background-clip:text;-webkit-background-clip:text;-webkit-text-fill-color:transparent;text-shadow:0 0 7px rgba(255,84,166,.12),0 0 10px rgba(53,200,239,.08);animation:permissionTextShader 4.8s linear 6}
   .permission-copy.permission-shader{background-image:linear-gradient(105deg,#69515f 0%,#b43b76 28%,#ff7eba 45%,#38758a 68%,#69515f 100%);text-shadow:0 0 5px rgba(255,84,166,.1)}
   .permission-actions{display:grid;grid-template-columns:1fr 1fr;border-top:1px solid rgba(95,54,77,.18)}
   .permission-action{height:39px;border:0;background:rgba(255,255,255,.58);color:#8b5270;font:900 11px/1 system-ui,-apple-system,sans-serif;cursor:pointer}
@@ -452,17 +492,46 @@
      choice rather than a new subject. */
   .introArt { width: 124px; height: 124px; margin: 0 auto 2px; position: relative; }
   .introArt canvas { width: 100%; height: 100%; display: block; }
+  /* .account-3d-icon is shared with the Choose Account cards, where 42px is
+     correct. On the explainer it is the pane's only image, so here it fills its
+     box. At 42px in a 124px box it sat at the box's LEFT edge — 27px left of
+     centre, reading as uncentred — with 54px of dead space beneath it that
+     pushed the copy 72px away instead of 18px. */
   .introArt .account-3d-icon { flex: 0 0 auto; width: 100%; height: 100%; border-radius: 26px; }
-  .introList { display: flex; flex-direction: column; gap: 9px; width: min(268px, 82cqw);
-    margin: 2px auto 0; text-align: center; }
+  .introList { display: flex; flex-direction: column; gap: 14px; width: min(268px, 82cqw);
+    margin: 6px auto 0; text-align: center; }
   /* No bullets — the copy carries itself. Type matches .stackSub, the body face
      used everywhere else in pre-login: .introItem was the one text class on this
      page that never declared a font-family, so it fell back to the -apple-system
      stack from the reset and read as a different typeface to everything around it. */
+  /* Same cream extruded clay as the title (.clayText), one weight down: the
+     four points ARE the screen, and leaving them as flat pink body copy made
+     the only styled thing on the pane the word "Personal". The shadow stack is
+     .clayText's, halved — at 13px the full 6px/12px lift smears instead of
+     reading as depth. */
   .introItem { display: block;
     font-family: "Arial Rounded MT Bold", ui-rounded, "SF Pro Rounded", system-ui, sans-serif;
     font-size: clamp(11px, 3cqw, 13px); font-weight: 800; line-height: 1.34;
-    color: #ffe3f1; text-shadow: 0 1px 3px rgba(104, 2, 48, 0.5); }
+    color: #f8efdc;
+    text-shadow:
+      0 -1px 0 rgba(255, 255, 255, 0.34),
+      0 1px 0 #d8b98e,
+      0 2px 0 rgba(158, 14, 78, 0.45),
+      0 3px 5px rgba(104, 2, 48, 0.45);
+    /* Each point arrives on its own beat, in reading order, so the pane
+       assembles itself rather than appearing as one block of text. `both`
+       holds the from-state before the delay elapses — without it every point
+       flashes at full opacity for a frame before its animation starts. */
+    opacity: 0; translate: 0 10px;
+    animation: introItemIn 0.52s cubic-bezier(0.22, 0.9, 0.3, 1) both;
+    animation-delay: calc(var(--i, 0) * 95ms + 140ms); }
+  @keyframes introItemIn {
+    from { opacity: 0; translate: 0 10px; }
+    to { opacity: 1; translate: 0 0; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .introItem { animation: none; opacity: 1; translate: 0 0; }
+  }
   /* Personal and business are two pages of one step, so switching account type
      interpolates the stack instead of cutting straight to the other copy. */
   #paneAccountIntro .formStack { transition: opacity 0.18s ease; }
@@ -500,11 +569,6 @@
   #paneBusinessProfile .formStack { gap: clamp(3px, 1.1cqw, 7px); }
   #paneBusinessProfile .stackField { height: clamp(36px, 10cqw, 44px); }
   #paneBusinessProfile .stackLbl { margin: 2px 0 -5px; }
-  #paneCreateLogin .formStack { gap: clamp(3px, 1cqw, 6px); }
-  #paneCreateLogin .stackField { height: clamp(36px, 10cqw, 44px); }
-  #paneCreateLogin .stackLbl { margin: 1px 0 -5px; }
-  #paneCreateLogin .stackAgree { margin: 2px 0; }
-  #paneCreateLogin .stackBtn { margin-top: 5px; }
   .formStack::-webkit-scrollbar { display: none; }
   /* Inside a stack, everything flows — absolute positioning is neutralized so
      elements can never overlap regardless of screen size. */
@@ -677,8 +741,8 @@
     <div class="formStack">
       <p class="clayText paneTitle stackTitle">Sign in</p>
       <button class="cap-btn stackBtn" type="button" id="faceIdBtn"><span class="shader-text">Sign in with Face ID</span></button>
-      <p class="stackSub">or sign in with username</p>
-      <input class="field fieldMail" type="text" placeholder="Username or E-Mail" autocomplete="username">
+      <p class="stackSub">or sign in with email</p>
+      <input class="field fieldMail" type="email" placeholder="E-Mail" autocomplete="email">
       <div class="fieldWrap">
         <input class="field fieldPass" type="password" placeholder="Password" autocomplete="current-password">
         <button class="forgotBtn" type="button">FORGOT</button>
@@ -719,8 +783,6 @@
     <div class="formStack">
       <p class="clayText paneTitle stackTitle">Create login</p>
       <p class="stackSub">Then continue with onboarding.</p>
-      <span class="stackLbl">USERNAME</span>
-      <input class="stackField" type="text" placeholder="poplurname" autocomplete="username">
       <span class="stackLbl">EMAIL</span>
       <input class="stackField" type="email" placeholder="you@example.com" autocomplete="email">
       <span class="stackLbl">PASSWORD</span>
@@ -815,7 +877,16 @@
       </div>
     </div>
   </div>
-  <audio id="radioBed" loop preload="none" src="/poplur-clay-map/public/radio_bed.wav"></audio>
+  <!-- The radio_bed.wav element used to live here. It is gone, not silenced.
+       It was a mono 11 kHz 12-second loop that nothing was ever meant to hear,
+       held down by `volume = 0` — and iOS ignores `volume` on a media element
+       entirely, so on a real iPhone it played at FULL volume and was the buzz
+       under the whole of pre-login. `muted` would have worked, but the mute
+       button's own applyMute() unmutes every <audio> on the page, so the buzz
+       would have come straight back the first time somebody un-muted. The only
+       version of this that cannot regress is not having the element. Pre-login
+       audio is now exactly the AI voice, the live station, and the pops. -->
+
     </div>
   </div>
 </div>
@@ -824,6 +895,7 @@
   // ── Native bridge (Phase-2 web-embed) ──────────────────────────────────────
   // Defined action set (identical on iOS + Android):
   //   signIn | signUp | requestPermission(permission: camera|location) | complete | pop
+  //   radioStations({callbackId}) -> window.__poplurStationsResult(callbackId, list)
   // iOS delivery:     window.webkit.messageHandlers.poplur.postMessage({action, ...})
   // Android delivery: window.PoplurNative.onAction(action, JSON.stringify(rest))
   // Auth + OS permission prompts stay Phase-3 stubs on the native side (log, no
@@ -993,8 +1065,20 @@
           circle(dot.x, dot.y, radius * 0.8, 'rgba(255,240,250,' + (flare * 0.85) + ')')
         }
       }
-      if (!still) animationFrame = requestAnimationFrame(draw)
+      // The heaviest loop on this screen: a full-screen redraw of every stud,
+      // three to five circle fills each, at 60fps forever. Park it with the
+      // rest of the ambient work — the studs hold their last pose, which is
+      // what they look like at any given instant anyway.
+      if (still) return
+      if (window.__poplurAmbient && !window.__poplurAmbient.awake()) { dotsParked = true; return }
+      animationFrame = requestAnimationFrame(draw)
     }
+    var dotsParked = false
+    if (window.__poplurAmbient) window.__poplurAmbient.onWake(function () {
+      if (!dotsParked) return
+      dotsParked = false
+      animationFrame = requestAnimationFrame(draw)
+    })
 
     addEventListener('resize', rebuild)
     addEventListener('load', rebuild)
@@ -1005,33 +1089,126 @@
     rebuild()
   })()
 
+  // ── Ambient sleep: the idle contract post-login already keeps ─────────────
+  //
+  // This screen ran THREE permanent requestAnimationFrame loops — the confetti,
+  // the cube's yaw, and a WebGL draw every frame — so it never reached a
+  // resting state at all. That is the whole of "pre-login doesn't feel as
+  // controlled as post-login": post-login parks its ambient work when nothing
+  // is happening, and this document had no way to.
+  //
+  // It is also why the thermal gate could not measure here. measure() waits for
+  // a document to declare idle through `poplur-ambient-sleep` and
+  // __poplurChromeIdle and throws after 120s if neither arrives — a page that
+  // never rests can never be sampled at rest. Declaring the same two signals is
+  // what puts this screen on the same scale as every other surface.
+  //
+  // Any touch wakes it, so the motion is there whenever someone is looking.
+  window.__poplurAmbient = (function () {
+    var awake = true, timer = 0, wakers = []
+    // Long enough that reading a pane never stills it mid-thought, short enough
+    // that a phone left on this screen stops burning frames.
+    var QUIET_MS = 20000
+    function sleep () {
+      if (!awake) return
+      awake = false
+      document.documentElement.classList.add('poplur-ambient-sleep')
+      window.__poplurChromeIdle = true
+    }
+    function wake () {
+      window.clearTimeout(timer)
+      timer = window.setTimeout(sleep, QUIET_MS)
+      if (awake) return
+      awake = true
+      document.documentElement.classList.remove('poplur-ambient-sleep')
+      window.__poplurChromeIdle = false
+      for (var i = 0; i < wakers.length; i++) { try { wakers[i]() } catch (e) {} }
+    }
+    ;['pointerdown', 'pointermove', 'keydown', 'touchstart', 'wheel'].forEach(function (t) {
+      window.addEventListener(t, wake, { passive: true })
+    })
+    wake()
+    return {
+      awake: function () { return awake },
+      // Loops park themselves and register here to be restarted.
+      onWake: function (fn) { wakers.push(fn) },
+      wake: wake,
+    }
+  })()
+
   ;(() => {
     var colors = ['#FF2D55', '#FF9500', '#FFCC00', '#34C759', '#007AFF', '#AF52DE']
     var box = document.getElementById('confetti')
-    var birthRate = 45, particles = [], last = performance.now(), carry = 0
-    function place(p) {
-      var t = p.age
-      var x = p.x + p.vx * t + 0.5 * p.ax * t * t
-      var y = p.y + p.vy * t + 0.5 * p.ay * t * t
-      var scale = Math.max(0.2, p.scale - 0.03 * t)
-      var alpha = Math.max(0, Math.min(1, p.alpha - 0.05 * t))
-      p.el.style.transform = 'translate3d(' + x + 'px,' + y + 'px,0) rotate(' + (p.rotation + p.rotationSpeed * t) + 'rad) scale(' + scale + ')'
-      p.el.style.opacity = alpha
+
+    // ── One canvas, not 189 elements ────────────────────────────────────────
+    // This used to hold a live <i class="cf"> per particle: ~189 of them at
+    // steady state (birthRate 45/s x ~4.2s life), each given a fresh `transform`
+    // and `opacity` inline on EVERY frame. That is roughly 22,000 style
+    // mutations a second across 189 separate compositing layers, and it is why
+    // the pre-login ran hotter than anything post-login — which is measured by
+    // a gate this document has never been on.
+    //
+    // Same physics, same numbers, same sprite. The particles are now plain
+    // objects drawn into a single 2D canvas: one clearRect and one drawImage
+    // each, no DOM writes and no layers.
+    var cv = document.createElement('canvas')
+    cv.style.cssText = 'position:absolute;inset:0;pointer-events:none'
+    box.appendChild(cv)
+    var ctx = cv.getContext('2d')
+    // Capped at 2: confetti is soft-edged clay, not type — the third sample
+    // buys nothing here and this is a FULL-SCREEN surface, so unlike the 124px
+    // account art its cost scales with the viewport.
+    var dpr = Math.min(window.devicePixelRatio || 1, 2), W = 0, H = 0
+    function resize () {
+      W = box.clientWidth || 393
+      H = box.clientHeight || 852
+      cv.width = Math.round(W * dpr)
+      cv.height = Math.round(H * dpr)
     }
+    resize()
+    window.addEventListener('resize', resize)
+
+    // The clay sprinkle, drawn ONCE per colour. Baking the rounded rect, the
+    // drop shadow and the pressed highlight into a sprite keeps exactly what
+    // the .cf rule drew while making the per-frame cost a single blit.
+    var SPRITE = 13, PAD = 6, SS = SPRITE + PAD * 2
+    var sprites = colors.map(function (hex) {
+      var sc = document.createElement('canvas')
+      sc.width = sc.height = Math.round(SS * dpr)
+      var c = sc.getContext('2d')
+      c.scale(dpr, dpr)
+      c.translate(PAD, PAD)
+      c.shadowColor = 'rgba(110, 4, 54, 0.45)'
+      c.shadowBlur = 3
+      c.shadowOffsetY = 2
+      c.fillStyle = hex
+      c.beginPath()
+      if (c.roundRect) c.roundRect(0, 0, SPRITE, SPRITE, 3)
+      else c.rect(0, 0, SPRITE, SPRITE)
+      c.fill()
+      c.shadowColor = 'transparent'
+      // inset 0 1px 1px rgba(255,255,255,.55) + inset 0 -1px 2px rgba(0,0,0,.18)
+      c.globalCompositeOperation = 'source-atop'
+      var g = c.createLinearGradient(0, 0, 0, SPRITE)
+      g.addColorStop(0, 'rgba(255,255,255,0.55)')
+      g.addColorStop(0.3, 'rgba(255,255,255,0)')
+      g.addColorStop(0.8, 'rgba(0,0,0,0)')
+      g.addColorStop(1, 'rgba(0,0,0,0.18)')
+      c.fillStyle = g
+      c.fillRect(0, 0, SPRITE, SPRITE)
+      return sc
+    })
+
+    var birthRate = 45, particles = [], last = performance.now(), carry = 0
     function spawn(prefillAge) {
-      var width = box.clientWidth || 393
       var life = 3.2 + Math.random() * 2
       var speed = 130 + Math.random() * 180
       var spread = (Math.random() - 0.5) * (Math.PI / 5)
-      var d = document.createElement('i')
-      d.className = 'cf'
-      d.style.background = colors[(Math.random() * colors.length) | 0]
-      box.appendChild(d)
-      var p = {
-        el: d,
+      particles.push({
+        sprite: sprites[(Math.random() * sprites.length) | 0],
         age: Math.min(prefillAge || 0, life - 0.001),
         life: life,
-        x: -200 + Math.random() * (width + 400),
+        x: -200 + Math.random() * (W + 400),
         y: -44,
         vx: Math.sin(spread) * speed,
         vy: Math.cos(spread) * speed,
@@ -1041,30 +1218,63 @@
         rotationSpeed: 2.5,
         scale: 0.33 + Math.random() * 0.44,
         alpha: 0.9 + Math.random() * 0.2
-      }
-      particles.push(p)
-      place(p)
+      })
     }
     for (var i = 0; i < Math.round(birthRate * 4.2); i++) {
-      var life = 3.2 + Math.random() * 2
-      spawn(Math.random() * life)
+      spawn(Math.random() * (3.2 + Math.random() * 2))
     }
     function tick(now) {
       var dt = Math.min(0.05, Math.max(0, (now - last) / 1000))
       last = now
-      carry += dt * birthRate
-      while (carry >= 1) { spawn(); carry -= 1 }
+      // Nothing is on screen behind a backgrounded WebView, so stop spawning
+      // and stop drawing — the loop stays alive only to keep time.
+      if (document.hidden) { requestAnimationFrame(tick); return }
+      // Asleep: stop SPAWNING but keep drawing until the field has drained, so
+      // the confetti settles out rather than vanishing mid-air. Once the last
+      // piece is gone the loop parks completely and waits to be woken.
+      var resting = window.__poplurAmbient && !window.__poplurAmbient.awake()
+      if (!resting) {
+        carry += dt * birthRate
+        while (carry >= 1) { spawn(); carry -= 1 }
+      } else if (!particles.length) {
+        ctx.setTransform(1, 0, 0, 1, 0, 0)
+        ctx.clearRect(0, 0, cv.width, cv.height)
+        parked = true
+        return
+      }
+      ctx.setTransform(1, 0, 0, 1, 0, 0)
+      ctx.clearRect(0, 0, cv.width, cv.height)
       for (var i = particles.length - 1; i >= 0; i--) {
         var p = particles[i]
         p.age += dt
-        if (p.age >= p.life) {
-          p.el.remove()
-          particles.splice(i, 1)
-        } else place(p)
+        if (p.age >= p.life) { particles.splice(i, 1); continue }
+        var t = p.age
+        var x = p.x + p.vx * t + 0.5 * p.ax * t * t
+        var y = p.y + p.vy * t + 0.5 * p.ay * t * t
+        // Fell past the slab: the DOM version kept paying for these until their
+        // life ran out, because overflow:hidden only stopped them being SEEN.
+        if (y > H + 80) { particles.splice(i, 1); continue }
+        var scale = Math.max(0.2, p.scale - 0.03 * t)
+        var alpha = Math.max(0, Math.min(1, p.alpha - 0.05 * t))
+        var rot = p.rotation + p.rotationSpeed * t
+        // The element rotated about its own centre while `left/top` placed its
+        // corner, so the centre sat half a sprite in from (x, y). Same here.
+        var cos = Math.cos(rot) * scale, sin = Math.sin(rot) * scale
+        ctx.setTransform(cos * dpr, sin * dpr, -sin * dpr, cos * dpr,
+                         (x + SPRITE / 2) * dpr, (y + SPRITE / 2) * dpr)
+        ctx.globalAlpha = alpha
+        ctx.drawImage(p.sprite, -SS / 2, -SS / 2, SS, SS)
       }
       requestAnimationFrame(tick)
     }
+    var parked = false
     requestAnimationFrame(tick)
+    if (window.__poplurAmbient) window.__poplurAmbient.onWake(function () {
+      if (!parked) return
+      parked = false
+      last = performance.now()
+      requestAnimationFrame(tick)
+    })
     var stage = document.getElementById('lcubeStage')
     var yaw = -24, vel = 46, dragging = false, startX = 0, startYaw = 0, lastT = 0
     // Two modes: 'spin' — constant rotation on the welcome pane; 'back' — on a
@@ -1144,7 +1354,14 @@
     }
     stage.addEventListener('pointerup', up); stage.addEventListener('pointercancel', up)
     var last = performance.now()
+    var cubeParked = false
     function loop(now) {
+      // Asleep and not mid-gesture: stop advancing the yaw. The GL draw below
+      // reads __poplurCubeYaw, so parking here stops the render too.
+      if (!dragging && window.__poplurAmbient && !window.__poplurAmbient.awake()) {
+        cubeParked = true
+        return
+      }
       requestAnimationFrame(loop)
       // Guard the frame delta: if the rAF clock stalls or jumps (throttled or
       // non-compositing environments), fall back to a nominal 60fps step so the
@@ -1173,6 +1390,12 @@
       window.__poplurCubeRoll = roll
     }
     requestAnimationFrame(loop)
+    if (window.__poplurAmbient) window.__poplurAmbient.onWake(function () {
+      if (!cubeParked) return
+      cubeParked = false
+      last = performance.now()
+      requestAnimationFrame(loop)
+    })
   })()
 
   ;(() => {
@@ -1278,7 +1501,8 @@
       // layout, because it needs a smaller, higher cube than the welcome does.
       // An inline `top` written here outranks that rule — which is exactly what
       // dropped the cube back down into the stack and left the account art
-      // sitting on top of it. Hand the pane back to its stylesheet instead.
+      // sitting on top of it. Measured: cube 269-361px, art 281-377px.
+      // Hand the pane back to its stylesheet instead of fighting it.
       if (document.querySelector('.phone.introPane')) stage.style.removeProperty('top')
       else if (stage.classList.contains('risen')) stage.style.top = cubeTop + 'px'
       clayHeadEl.style.top = textTop + 'px'
@@ -1325,9 +1549,9 @@
       }, 450)
     }, 5200)
 
-    // ── Radio bed — starts on the GCL audio grant or first touch, and keeps
-    // playing across carousel slides so it is never cut off or restarted ──
-    var radio = document.getElementById('radioBed')
+    // ── Pre-login audio — the AI voice and the live station, nothing else.
+    // Whatever turns audio on (the GCL grant, or the first touch on a device)
+    // starts the voice; the station tunes itself separately below. ──
     var audioOn = false
     var synth = window.speechSynthesis
     function speakAI(text) {
@@ -1352,22 +1576,11 @@
     function setAudio(on) {
       audioOn = on
       if (on) {
-        radio.muted = false
-        if (radio.volume === 1) radio.volume = 0.55
-        // Pick the bed up where the previous screen left it — never restart.
-        if (radio.paused) {
-          try { radio.currentTime = parseFloat(sessionStorage.getItem('poplurRadio.t') || '0') || 0 } catch (e) {}
-        }
-        radio.play().catch(function () {})
         speakAI(aiText.textContent)
       } else {
-        radio.pause()
         try { synth && synth.cancel() } catch (e) {}
       }
     }
-    setInterval(function () {
-      if (!radio.paused) try { sessionStorage.setItem('poplurRadio.t', String(radio.currentTime)) } catch (e) {}
-    }, 500)
     // Mute toggle: silences the radio bed, AI voice, and pops across pre-login.
     // Persisted so the choice survives the carousel and page handoffs.
     ;(function () {
@@ -1391,11 +1604,10 @@
       try { saved = sessionStorage.getItem('poplurMuted') || '0' } catch (e) {}
       if (saved === '1') applyMute(true)
     })()
-    // ── Live radio: the fuzz bed is never audible. Cycle through the nearest
+    // ── Live radio: the only music in pre-login. Cycle through the nearest
     // popular stations (Radio Browser, ordered by clickcount) until one
     // actually plays, then that station IS the radio. ──
     ;(function () {
-      radio.volume = 0 // fuzz bed silenced permanently; kept only as a clock
       var live = document.createElement('audio')
       live.crossOrigin = 'anonymous'
       live.preload = 'none'
@@ -1434,16 +1646,20 @@
       })
       tune() // ambient attempt — succeeds inside the prototype frame
     })()
-    // Attempt ambient autoplay: permitted inside the prototype (its frame
-    // grants allow=autoplay); silently ignored where the browser blocks it
-    // until a gesture or a GCL grant arrives.
-    setTimeout(function () {
-      if (audioOn) return
-      radio.muted = false
-      if (radio.volume === 1) radio.volume = 0.55
-      try { radio.currentTime = parseFloat(sessionStorage.getItem('poplurRadio.t') || '0') || 0 } catch (e) {}
-      radio.play().then(function () { setAudio(true) }).catch(function () {})
-    }, 300)
+    // Attempt ambient audio: permitted inside the prototype (its frame grants
+    // allow=autoplay), ignored on a device until a gesture. This used to probe
+    // for permission by play()ing the radio bed and turning audio on if that
+    // resolved — which is the other reason the bed existed. With the bed gone,
+    // ask directly, and let the first touch re-arm it if the browser refused.
+    setTimeout(function () { if (!audioOn) setAudio(true) }, 300)
+    // On a device audio is granted by the first touch and not before. Calling
+    // setAudio again is harmless and is what starts the voice there — speakAI
+    // simply speaks the current line. Previously the only device path to audio
+    // was the permission pane, several screens in.
+    window.addEventListener('pointerdown', function audioOnce () {
+      window.removeEventListener('pointerdown', audioOnce)
+      setAudio(true)
+    })
     addEventListener('message', function (event) {
       var data = event && event.data
       if (!data) return
@@ -1475,6 +1691,11 @@
       // drives both halves of that — a smaller, higher cube and a stack that
       // comes up with it — so the two move as one.
       document.querySelector('.phone')?.classList.toggle('introPane', index === 8)
+      // Stepping onto (or off) the explainer changes which of the two cube
+      // positions applies, and only computeLayout owns the inline top that
+      // decides it. Without this the class flips but the cube keeps whatever
+      // pixel top the last layout pass wrote.
+      if (window.__poplurComputeLayout) window.__poplurComputeLayout()
     }
     // Cube = back button. Each sign-up step goes back one logical page; the
     // personal photo pane (7) returns to Create login (3).
@@ -1509,10 +1730,10 @@
     // Login outcome drives the cube: valid details → success gesture; a bad
     // login shakes it onto the ERROR face and raises the alert.
     document.querySelector('#paneSignIn .paneBtn').addEventListener('click', function () {
-      var identifier = document.querySelector('#paneSignIn .fieldMail').value.trim()
+      var email = document.querySelector('#paneSignIn .fieldMail').value.trim()
       var pass = document.querySelector('#paneSignIn .fieldPass').value
-      if (identifier.length >= 2 && pass.length >= 4) { var __p = window.poplurBridge && poplurBridge.signIn({ identifier: identifier, password: pass, method: 'password' }); if (!__p) cubeSuccess() }
-      else signupError('That login doesn’t look right — check your username and password.')
+      if (/.+@.+\..+/.test(email) && pass.length >= 4) { var __p = window.poplurBridge && poplurBridge.signIn({ email: email, password: pass, method: 'password' }); if (!__p) cubeSuccess() }
+      else signupError('That login doesn’t look right — check your email and password.')
     })
     // Face ID sign-in: the simulated scan succeeds straight away.
     document.getElementById('faceIdBtn').addEventListener('click', function () { var __p = window.poplurBridge && poplurBridge.signIn({ method: 'faceid' }); if (!__p) cubeSuccess() })
@@ -1522,16 +1743,14 @@
     function isBusiness() { return document.querySelector('.acctB').classList.contains('on') }
     function finishSignup(message) {
       var acctType = isBusiness() ? 'business' : 'personal'
-      var suUsername = '', suEmail = '', suPass = ''
+      var suEmail = '', suPass = ''
       try {
-        var __un = document.querySelector('#paneCreateLogin input[autocomplete="username"]')
         var __em = document.querySelector('#paneCreateLogin input[type="email"]')
         var __pw = document.querySelectorAll('#paneCreateLogin input[type="password"]')
-        suUsername = __un ? __un.value.trim() : ''
         suEmail = __em ? __em.value.trim() : ''
         suPass = (__pw && __pw[0]) ? __pw[0].value : ''
       } catch (e) {}
-      var __posted = window.poplurBridge && poplurBridge.signUp({ username: suUsername, email: suEmail, password: suPass, accountType: acctType })
+      var __posted = window.poplurBridge && poplurBridge.signUp({ email: suEmail, password: suPass, accountType: acctType })
       if (!__posted) {
         cubeSuccess()
         if (window.__poplurShowAlert) window.__poplurShowAlert(message, 'Nice!')
@@ -1579,6 +1798,7 @@
     }
 
     var introPainted = false
+    var introLastBiz = null
     function renderAccountIntro () {
       var biz = isBusiness()
       var copy = biz ? INTRO.business : INTRO.personal
@@ -1590,16 +1810,26 @@
         document.getElementById('introArtBusiness').hidden = !biz
         var list = document.getElementById('introList')
         list.textContent = ''
-        copy.points.forEach(function (text) {
+        copy.points.forEach(function (text, i) {
           var row = document.createElement('div')
           row.className = 'introItem'
+          // Drives the stagger in CSS rather than a per-row delay in script, so
+          // the timing lives next to the animation it belongs to.
+          row.style.setProperty('--i', i)
           row.textContent = text
           list.appendChild(row)
         })
       }
       // First paint is instant — there is nothing to interpolate from, and the
-      // pane is still sliding in. Only a genuine change of account type fades.
-      if (!introPainted || !stack) { introPainted = true; paint(); return }
+      // pane is still sliding in. Only a genuine CHANGE of account type fades.
+      // Re-entering on the SAME type also repaints, instantly: the rows are
+      // rebuilt, so their entrance animations start over and the points stagger
+      // in again. Without this the guard held the old rows and the second visit
+      // showed the copy already assembled.
+      var changed = introPainted && introLastBiz !== biz
+      introPainted = true
+      introLastBiz = biz
+      if (!changed || !stack) { paint(); return }
       stack.classList.add('introSwapping')
       setTimeout(function () {
         paint()
@@ -1610,11 +1840,9 @@
     document.getElementById('introNext').addEventListener('click', function () { setPane(3) })
     // Create login → validated → Business profile (business) or done (personal)
     document.querySelector('#paneCreateLogin [data-signup-next]').addEventListener('click', function () {
-      var username = document.querySelector('#paneCreateLogin input[autocomplete="username"]').value.trim()
       var email = document.querySelector('#paneCreateLogin input[type="email"]').value.trim()
       var pws = document.querySelectorAll('#paneCreateLogin input[type="password"]')
       var agree = document.querySelector('#paneCreateLogin input[type="checkbox"]').checked
-      if (username.replace(/^@+/, '').length < 2) return signupError('Choose a username with at least 2 characters.')
       if (!/.+@.+\..+/.test(email)) return signupError('Enter a valid email address.')
       if (pws[0].value.length < 6) return signupError('Your password needs at least 6 characters.')
       if (pws[0].value !== pws[1].value) return signupError('Those passwords don’t match.')
@@ -1896,8 +2124,18 @@ if (POPLUR_WEBGL_OK) document.querySelectorAll("canvas[data-account-model]").for
     canvas.closest(".account-3d-icon")?.classList.add("model-error");
     return;
   }
-  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-  renderer.setSize(84, 84, false);
+  // Rendered at 84px but DISPLAYED at 124px (.introArt), so this was upscaling
+  // before the pixel ratio even applied: 84 x 2 = 168 backing pixels stretched
+  // across 372 device pixels on a 3x phone. That is the blockiness on the
+  // account-type art, and it is resolution, not a compressed texture.
+  //
+  // Take the ratio the panel actually has, and render at the size the element
+  // actually occupies. This is a 124px surface, so its cost is bounded by its
+  // own size rather than the viewport — the same reason the post-login clay
+  // widgets can afford full resolution while the full-screen map cannot.
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 3));
+  var artBox = canvas.clientWidth || 124;
+  renderer.setSize(artBox, artBox, false);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(27, 1, .01, 20);
@@ -1989,7 +2227,11 @@ if (POPLUR_WEBGL_OK) document.querySelectorAll("canvas[data-account-model]").for
       return;
     }
 
-    renderer.setPixelRatio(Math.min(devicePixelRatio, recoveryAttempt === 0 ? 2 : 1.25));
+    // Same correction as the account art above. The recovery pass still steps
+    // down — it exists for devices that just failed to build a context — but
+    // 1.25 was far enough below the panel that a successful recovery looked
+    // broken in its own way.
+    renderer.setPixelRatio(Math.min(devicePixelRatio, recoveryAttempt === 0 ? 3 : 2));
     renderer.setSize(254, 254, false);
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     const scene = new THREE.Scene();
@@ -2034,16 +2276,24 @@ if (POPLUR_WEBGL_OK) document.querySelectorAll("canvas[data-account-model]").for
       if (window.__poplurCubeGLReady) window.__poplurCubeGLReady();
       const draw = () => {
         if (!runtime || runtime.renderer !== renderer) return;
+        // The third permanent loop. It reads __poplurCubeYaw, which stops
+        // advancing when the cube parks, so continuing to draw would burn a
+        // full WebGL frame to render an unchanged pose. Park with it.
+        if (window.__poplurAmbient && !window.__poplurAmbient.awake()) {
+          runtime.frame = 0;
+          return;
+        }
         runtime.frame = requestAnimationFrame(draw);
-        group.rotation.y = (window.__poplurCubeYaw || 0) * Math.PI / 180;
+        group.rotation.y = (window.__poplurCubeYaw || 0) * Math.PI / 180 + (window.__poplurCubeTiltY || 0);
         const rollRad = (window.__poplurCubeRoll || 0) * Math.PI / 180;
         rollGroup.rotation.z = rollRad;
-        // Counter the tilt as it rolls, so the cube keeps leaning toward the
-        // viewer instead of appearing to lean away once it is upside down.
-        group.rotation.x = (14 * Math.PI / 180) * Math.cos(rollRad);
+        group.rotation.x = (14 * Math.PI / 180) * Math.cos(rollRad) + (window.__poplurCubeTiltX || 0);
         renderer.render(scene, camera);
       };
       draw();
+      if (window.__poplurAmbient) window.__poplurAmbient.onWake(() => {
+        if (runtime && runtime.renderer === renderer && !runtime.frame) draw();
+      });
     }, undefined, () => {
       if (!runtime || runtime.renderer !== renderer) return;
       recoveryAttempt += 1;
@@ -2079,16 +2329,50 @@ if (POPLUR_WEBGL_OK) document.querySelectorAll("canvas[data-account-model]").for
   }, 1000);
 
   mountLoginCube();
+
+  // Accelerometer tilt on the login cube — gentle response to device orientation
+  ;(function () {
+    var tiltX = 0, tiltY = 0, smoothX = 0, smoothY = 0, raf = 0
+    var MAX_TILT = 0.28
+    function onOrientation (e) {
+      var beta = e.beta || 0, gamma = e.gamma || 0
+      tiltX = Math.max(-MAX_TILT, Math.min(MAX_TILT, (beta - 45) * Math.PI / 180 * 0.3))
+      tiltY = Math.max(-MAX_TILT, Math.min(MAX_TILT, gamma * Math.PI / 180 * 0.3))
+    }
+    function smooth () {
+      smoothX += (tiltX - smoothX) * 0.08
+      smoothY += (tiltY - smoothY) * 0.08
+      window.__poplurCubeTiltX = smoothX
+      window.__poplurCubeTiltY = smoothY
+      raf = requestAnimationFrame(smooth)
+    }
+    if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+      document.addEventListener('click', function ask () {
+        DeviceOrientationEvent.requestPermission().then(function (state) {
+          if (state === 'granted') {
+            window.addEventListener('deviceorientation', onOrientation, { passive: true })
+            smooth()
+          }
+        }).catch(function () {})
+        document.removeEventListener('click', ask)
+      }, { once: true })
+    } else if ('DeviceOrientationEvent' in window) {
+      window.addEventListener('deviceorientation', onOrientation, { passive: true })
+      smooth()
+    }
+  })()
 })();
 </script>
 
 <script>
-  // ── Pre-login colour lab (DEV ONLY) ────────────────────────────────────────
-  // Off by default and gated twice over, because this page ships to iOS,
-  // Android and React Native: the button is display:none until <html> carries
-  // .poplur-colorlab, and that class is only added on an explicit opt-in.
-  //   ?colorlab=1        turn on (remembered on this device)
+  // ── Pre-login colour orb ───────────────────────────────────────────────────
+  // ON by default: this is a customer-facing control on iOS, Android and React
+  // Native. The CSS still keys off the .poplur-colorlab class on <html>; boot()
+  // now adds it unless the person has explicitly opted out, which is why the
+  // styling above did not have to change at all.
+  //   ?colorlab=0        turn off (remembered on this device)
   //   __poplurColorLab(false)  turn off
+  //   ?colorlab=1 / __poplurColorLab(true)  turn back on
   //
   // Colours stay on-brand: the page background is #ff2d96 = hsl(330 100% 59%),
   // so the lab roams H 315-345, S 70-100%, L 45-68% — tone and saturation vary,
@@ -2123,6 +2407,17 @@ if (POPLUR_WEBGL_OK) document.querySelectorAll("canvas[data-account-model]").for
       // orb appeared to do nothing at all.
       var stageEl = document.querySelector('.stage')
       if (stageEl) stageEl.style.setProperty('background', hex, 'important')
+      // .pink is the one that actually shows. It is `position: fixed; inset: 0;
+      // z-index: 0` and paints the brand slab plus the quilted dot press, so it
+      // sits OVER html, body and .stage — every colour rolled above was being
+      // applied correctly and then covered up, which is the whole of "the orb
+      // does nothing when pressed".
+      //
+      // background-COLOR, not the `background` shorthand: the shorthand would
+      // also reset background-image and take the dot texture and the centre
+      // light out with it, turning the slab flat.
+      var pinkEl = document.querySelector('.pink')
+      if (pinkEl) pinkEl.style.setProperty('background-color', hex, 'important')
       // The hub of the wheel IS the current colour, exactly as the map's
       // takeover picker shows the colour it is currently painting with.
       var wheel = document.getElementById('hueWheel')
@@ -2132,6 +2427,7 @@ if (POPLUR_WEBGL_OK) document.querySelectorAll("canvas[data-account-model]").for
       // still recoverable without printing chrome over the design.
       var swatch = document.getElementById('hueBtn')
       if (swatch) swatch.setAttribute('title', hex)
+      document.documentElement.style.setProperty('--poplur-bg', hex)
       window.__poplurHue = hex
     }
 
@@ -2157,6 +2453,8 @@ if (POPLUR_WEBGL_OK) document.querySelectorAll("canvas[data-account-model]").for
         if (document.body) document.body.style.removeProperty('background')
         var st = document.querySelector('.stage')
         if (st) st.style.removeProperty('background')
+        var pk = document.querySelector('.pink')
+        if (pk) pk.style.removeProperty('background-color')
       }
       return !!on
     }
