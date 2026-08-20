@@ -15,3 +15,19 @@ android/.idea/
 android/build/
 android/app/build/
 android/local.properties
+
+# The clay map web bundle. ~105MB, rebuilt on every web change, and it was
+# tracked through Git LFS — 135 committed versions, each a FULL copy because
+# LFS stores whole files rather than deltas. That is what exhausted the LFS
+# budget and blocked pushing this repo entirely.
+#
+# It is a BUILD ARTIFACT, not source: poplur-clay-map/scripts/sync-mobile.sh
+# produces it (and writes it here) from the web repo, the same run that
+# publishes iOS and Android. Its identity is recorded in bundle.json, so a
+# build can tell whether the copy on disk is the one it expects.
+#
+# NOT published to the asset bucket on purpose: that bucket is world-readable
+# (allUsers/objectViewer) and the built JS inlines the VITE_ keys, so serving
+# this zip from it would put a Mapbox token and an ElevenLabs sk_ key behind a
+# plain URL.
+src/assets/claymap/claymap.zip

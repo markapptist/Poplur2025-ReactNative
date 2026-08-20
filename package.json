@@ -10,7 +10,11 @@
     "web": "expo start --web",
     "typecheck": "tsc --noEmit",
     "profile:inventory": "node scripts/profile-screen-inventory.mjs",
-    "postinstall": "patch-package"
+    "postinstall": "patch-package",
+    "ensure-claymap": "node scripts/ensure-claymap.mjs",
+    "prestart": "node scripts/ensure-claymap.mjs",
+    "preandroid": "node scripts/ensure-claymap.mjs",
+    "preios": "node scripts/ensure-claymap.mjs"
   },
   "dependencies": {
     "@dr.pogodin/react-native-fs": "^2.30.0",
