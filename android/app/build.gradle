@@ -99,6 +99,12 @@ android {
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
         versionName "1.0.0"
+        // react-native-iap ships separate Amazon Appstore / Google Play
+        // flavors for its Android module; Poplur only ships on Google Play
+        // (matching the native Android app's Play Billing integration in
+        // PoplurBillingManager.kt), so pick that flavor explicitly or Gradle
+        // cannot resolve which variant of :react-native-iap to use.
+        missingDimensionStrategy 'store', 'play'
         ndk {
             abiFilters.addAll(reactNativeArchitectures)
         }

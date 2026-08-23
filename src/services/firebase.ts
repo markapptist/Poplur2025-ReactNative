@@ -2,6 +2,7 @@ import { initializeApp, getApps } from 'firebase/app';
 import { getAuth, initializeAuth } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
+import { getFunctions } from 'firebase/functions';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Converted from the uploaded iOS GoogleService-Info.plist.
@@ -32,3 +33,5 @@ export const auth = (() => {
 })();
 export const db = getFirestore(firebaseApp);
 export const storage = getStorage(firebaseApp);
+// verifyCardPurchase (Poplur Cards store) is deployed only in us-central1.
+export const functions = getFunctions(firebaseApp, 'us-central1');

@@ -28,6 +28,7 @@ import {
   webPerformanceMessage,
 } from '../performance/PoplurPerformanceManager';
 import { initializeFeedGoogleAds, presentFeedGoogleAd } from '../services/feedAds';
+import { handleStoreCheckoutRequested } from '../services/storeCheckout';
 
 // Post-login HOME web embed (RN parity with iOS/Android Phase 3).
 //
@@ -601,6 +602,23 @@ export function PostLoginHomeWebScreen({
     }
   }, []);
 
+  // Delivers a native result back the SAME way iOS/Android do: a raw
+  // window.postMessage (not a CustomEvent) so HomeTwin.tsx's
+  // onNativeCheckoutResult listener — shared by all three platforms — picks
+  // it up without any RN-specific handling on the web side.
+  const postToWeb = useCallback((payload: unknown) => {
+    const json = JSON.stringify(payload)
+      .replace(/</g, '\\u003c')
+      .replace(/>/g, '\\u003e')
+      .replace(/&/g, '\\u0026');
+    webViewRef.current?.injectJavaScript(`window.postMessage(${json}, '*'); true;`);
+  }, []);
+
+  const runStoreCheckout = useCallback(async (message: ClayMessage) => {
+    const result = await handleStoreCheckoutRequested(message);
+    postToWeb(result);
+  }, [postToWeb]);
+
   const handleMessage = (event: WebViewMessageEvent) => {
     try {
       const message = JSON.parse(event.nativeEvent.data) as ClayMessage;
@@ -634,7 +652,7 @@ export function PostLoginHomeWebScreen({
           ? Number(message.sequence)
           : ++feedAdSequenceRef.current;
         feedAdSequenceRef.current = Math.max(feedAdSequenceRef.current, sequence);
-        if (sequence > 0 && sequence % 3 === 0) {
+        if (sequence > 0 && sequence % 2 === 0) {
           presentFeedGoogleAd(open => {
             dispatchToClay('poplur-native-feed-ad', { open });
           });
@@ -668,6 +686,7 @@ export function PostLoginHomeWebScreen({
         }
       }
       if (message.type === 'publishPost') void publishPost(message);
+      if (message.type === 'poplurStoreCheckoutRequested') void runStoreCheckout(message);
     } catch {
       // Non-JSON messages are ignored.
     }
