@@ -19,10 +19,6 @@ import {
   markPermissionPrimerHandled,
   type PrimerPermission,
 } from '../services/permissionPrimer';
-import {
-  useNativeVoiceAssistant,
-  type NativeVoiceCommand,
-} from '../services/nativeVoiceAssistant';
 import { poplurAssetCache } from '../performance/PoplurAssetCache';
 import { usePoplurHeavyRenderer, usePoplurPerformance } from '../performance/PoplurPerformance';
 import {
@@ -197,7 +193,6 @@ export function PostLoginHomeWebScreen({
   const [permissionNeeds, setPermissionNeeds] = useState<PermissionNeeds | null>(null);
   const photoPrimerConsumedRef = useRef(false);
   const homeReadyRef = useRef(false);
-  const pendingNativeVoiceCommandRef = useRef<NativeVoiceCommand | null>(null);
   const inAppBrowserOpenRef = useRef(false);
   const cameraLiveVisibleRef = useRef(false);
   const feedAdSequenceRef = useRef(0);
@@ -429,28 +424,10 @@ export function PostLoginHomeWebScreen({
     }
   }, [dispatchToClay]);
 
-  const deliverNativeVoiceCommand = useCallback((command: NativeVoiceCommand) => {
-    if (!homeReadyRef.current) {
-      pendingNativeVoiceCommandRef.current = command;
-      return;
-    }
-    dispatchToClay('poplur-native-voice-command', command);
-  }, [dispatchToClay]);
-
-  const { requestVoiceAssistant } = useNativeVoiceAssistant({
-    enabled: Platform.OS !== 'web',
-    onCommand: deliverNativeVoiceCommand,
-  });
-
   const markHomeReady = useCallback(() => {
     homeReadyRef.current = true;
     setHomeReady(true);
-    const pending = pendingNativeVoiceCommandRef.current;
-    if (pending) {
-      pendingNativeVoiceCommandRef.current = null;
-      dispatchToClay('poplur-native-voice-command', pending);
-    }
-  }, [dispatchToClay]);
+  }, []);
 
   const requestAndPushLocation = useCallback(async () => {
     await markPermissionPrimerHandled('location').catch(error =>
@@ -631,12 +608,6 @@ export function PostLoginHomeWebScreen({
       if (message.type === 'requestProfile') void sendProfileToWeb();
       if (message.type === 'requestProfilePosts') void sendProfilePostsToWeb();
       if (message.type === 'openInAppBrowser') void openInAppBrowser(message.url);
-      if (message.type === 'requestVoiceAssistant') {
-        // This message is emitted only by the visible HEY POPLUR tile. Home
-        // mount itself never requests microphone or speech permission.
-        void requestVoiceAssistant().catch(error =>
-          console.warn('[PostLoginHomeWebScreen] voice assistant request failed', error));
-      }
       if (message.type === 'permissionHandled'
         && (message.permission === 'location' || message.permission === 'photos')) {
         const permission = message.permission;

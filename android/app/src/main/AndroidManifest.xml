@@ -12,10 +12,6 @@
   <uses-permission android:name="android.permission.VIBRATE"/>
   <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>
   <queries>
-    <package android:name="com.google.android.googlequicksearchbox"/>
-    <intent>
-      <action android:name="android.speech.RecognitionService"/>
-    </intent>
     <intent>
       <action android:name="android.intent.action.VIEW"/>
       <category android:name="android.intent.category.BROWSABLE"/>

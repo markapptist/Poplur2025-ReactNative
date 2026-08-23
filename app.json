@@ -21,8 +21,7 @@
       "infoPlist": {
         "CADisableMinimumFrameDurationOnPhone": false,
         "NSCameraUsageDescription": "Poplur needs camera access so you can record location-based posts.",
-        "NSMicrophoneUsageDescription": "Poplur uses the microphone for Hey Poplur voice commands and to record videos.",
-        "NSSpeechRecognitionUsageDescription": "Poplur uses speech recognition to listen for Hey Poplur voice commands while Home is open.",
+        "NSMicrophoneUsageDescription": "Poplur uses the microphone to record videos.",
         "NSPhotoLibraryUsageDescription": "Poplur needs photo library access so you can choose media to post.",
         "NSLocationWhenInUseUsageDescription": "Poplur needs your location to show nearby posts on the map."
       }
@@ -39,13 +38,6 @@
       "expo-camera",
       "expo-image-picker",
       "expo-location",
-      [
-        "expo-speech-recognition",
-        {
-          "microphonePermission": "Poplur uses the microphone for Hey Poplur voice commands and to record videos.",
-          "speechRecognitionPermission": "Poplur uses speech recognition to listen for Hey Poplur voice commands while Home is open."
-        }
-      ],
       [
         "react-native-google-mobile-ads",
         {

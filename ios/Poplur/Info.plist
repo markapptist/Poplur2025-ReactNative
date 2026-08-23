@@ -54,11 +54,9 @@
     <key>NSLocationWhenInUseUsageDescription</key>
     <string>Poplur needs your location to show nearby posts on the map.</string>
     <key>NSMicrophoneUsageDescription</key>
-    <string>Poplur uses the microphone for Hey Poplur voice commands and to record videos.</string>
+    <string>Poplur uses the microphone to record videos.</string>
     <key>NSPhotoLibraryUsageDescription</key>
     <string>Poplur needs photo library access so you can choose media to post.</string>
-    <key>NSSpeechRecognitionUsageDescription</key>
-    <string>Poplur uses speech recognition to listen for Hey Poplur voice commands while Home is open.</string>
     <key>UILaunchStoryboardName</key>
     <string>SplashScreen</string>
     <key>UIRequiredDeviceCapabilities</key>
