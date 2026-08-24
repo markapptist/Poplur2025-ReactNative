@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Platform, StyleSheet, View } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Asset } from 'expo-asset';
 import * as FileSystem from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
@@ -66,6 +67,39 @@ const RN_NATIVE_SHELL = `
   true;
 `;
 
+type BackgroundAudioScope = 'screen' | 'app' | 'outside';
+type BackgroundAudioPreference = {
+  enabled: boolean;
+  scope: BackgroundAudioScope;
+};
+
+const BACKGROUND_AUDIO_ENABLED_KEY = 'poplur.backgroundAudioEnabled';
+const RADIO_SCOPE_KEY = 'poplur.radio.scope';
+
+function normalizeBackgroundAudioPreference(
+  enabled: boolean,
+  scope: string | null | undefined,
+): BackgroundAudioPreference {
+  if (!enabled) return { enabled: false, scope: 'screen' };
+  return { enabled: true, scope: scope === 'outside' ? 'outside' : 'app' };
+}
+
+function backgroundAudioBootstrap(preference: BackgroundAudioPreference): string {
+  const state = JSON.stringify(preference);
+  return `
+    (function () {
+      var state = ${state};
+      window.__poplurNativeBackgroundAudio = state;
+      try {
+        localStorage.setItem('poplur.radio.scope', state.scope);
+        localStorage.setItem('poplur.radio.background', state.enabled ? '1' : '0');
+        if (state.enabled) localStorage.setItem('poplur.radio.scope.explicit.v1', '1');
+        else localStorage.removeItem('poplur.radio.scope.explicit.v1');
+      } catch (_) {}
+    })();
+  `;
+}
+
 async function prepareBundle(): Promise<string> {
   const documentRoot = FileSystem.documentDirectory;
   if (!documentRoot) throw new Error('Poplur storage is unavailable.');
@@ -121,7 +155,7 @@ type ClayMessage = {
   sdp?: string;
   candidate?: Record<string, unknown>;
   video?: boolean;
-  scope?: 'once' | 'whileUsing';
+  scope?: 'once' | 'whileUsing' | BackgroundAudioScope;
   permission?: PrimerPermission;
   granted?: boolean;
   url?: string;
@@ -200,6 +234,7 @@ export function PostLoginHomeWebScreen({
   const [homeReady, setHomeReady] = useState(false);
   const [profileQuery, setProfileQuery] = useState('');
   const [profileReady, setProfileReady] = useState(false);
+  const [backgroundAudioPreference, setBackgroundAudioPreference] = useState<BackgroundAudioPreference | null>(null);
   const [permissionNeeds, setPermissionNeeds] = useState<PermissionNeeds | null>(null);
   const photoPrimerConsumedRef = useRef(false);
   const homeReadyRef = useRef(false);
@@ -224,6 +259,22 @@ export function PostLoginHomeWebScreen({
   const captureSessionPrefixRef = useRef(`temporary:home-capture:${Date.now()}-${Math.random().toString(36).slice(2)}:`);
   const captureCacheKeysRef = useRef(new Map<string, CaptureCacheRecord>());
   const callSignallingRef = useRef<NativeWebCallSignalling | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    void AsyncStorage.multiGet([BACKGROUND_AUDIO_ENABLED_KEY, RADIO_SCOPE_KEY])
+      .then(([[, enabledRaw], [, scope]]) => {
+        if (!active) return;
+        setBackgroundAudioPreference(normalizeBackgroundAudioPreference(
+          enabledRaw === '1' || enabledRaw === 'true',
+          scope,
+        ));
+      })
+      .catch(() => {
+        if (active) setBackgroundAudioPreference({ enabled: false, scope: 'screen' });
+      });
+    return () => { active = false; };
+  }, []);
 
   const pushPerformancePolicy = useCallback(() => {
     webViewRef.current?.injectJavaScript(createWebPerformanceUpdate(runtimeSnapshot));
@@ -751,6 +802,16 @@ export function PostLoginHomeWebScreen({
     postToWeb(result);
   }, [postToWeb]);
 
+  const persistBackgroundAudioScope = useCallback((scope: BackgroundAudioScope) => {
+    const preference = normalizeBackgroundAudioPreference(scope !== 'screen', scope);
+    setBackgroundAudioPreference(preference);
+    void AsyncStorage.multiSet([
+      [BACKGROUND_AUDIO_ENABLED_KEY, preference.enabled ? '1' : '0'],
+      [RADIO_SCOPE_KEY, preference.scope],
+    ]).catch(error =>
+      console.warn('[PostLoginHomeWebScreen] background audio preference save failed', error));
+  }, []);
+
   const handleMessage = (event: WebViewMessageEvent) => {
     try {
       const message = JSON.parse(event.nativeEvent.data) as ClayMessage;
@@ -758,6 +819,16 @@ export function PostLoginHomeWebScreen({
       if (message.type === 'requestProfile') void sendProfileToWeb();
       if (message.type === 'requestProfilePosts') void sendProfilePostsToWeb();
       if (message.type === 'requestNearbyTracks') void sendNearbyTracksToWeb(message);
+      if (message.type === 'radioScope'
+        && (message.scope === 'screen' || message.scope === 'app' || message.scope === 'outside')) {
+        persistBackgroundAudioScope(message.scope);
+      }
+      if (message.type === 'requestBackgroundAudio') {
+        dispatchToClay(
+          'poplur-native-background-audio',
+          backgroundAudioPreference ?? { enabled: false, scope: 'screen' },
+        );
+      }
       if (message.type === 'callStart'
         || message.type === 'callAccept'
         || message.type === 'callDescription'
@@ -842,7 +913,10 @@ export function PostLoginHomeWebScreen({
   // map keeps its 3D look while using the same constrained GPU budget as the
   // native shells. Native devices already select their own performance tier.
   const webMapQuery = Platform.OS === 'web' ? '&mapLite=1' : '';
-  const homeUri = origin && permissionNeeds && profileReady
+  const backgroundAudioBootstrapScript = backgroundAudioBootstrap(
+    backgroundAudioPreference ?? { enabled: false, scope: 'screen' },
+  );
+  const homeUri = origin && permissionNeeds && profileReady && backgroundAudioPreference
     // Include the archive version in the page URL too. Native WebViews cache
     // index.html aggressively; this prevents a fresh extracted bundle from
     // reopening a stale home page from their HTTP cache.
@@ -871,7 +945,9 @@ export function PostLoginHomeWebScreen({
           style={styles.web}
           source={{ uri: homeUri }}
           originWhitelist={['*']}
-          injectedJavaScriptBeforeContentLoaded={injectedShellRef.current}
+          injectedJavaScriptBeforeContentLoaded={
+            `${injectedShellRef.current}\n${backgroundAudioBootstrapScript}`
+          }
           onMessage={handleMessage}
           onLoadEnd={pushPerformancePolicy}
           allowsInlineMediaPlayback
