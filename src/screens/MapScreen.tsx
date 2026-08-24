@@ -1,17 +1,19 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Platform, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
-import MapView, { Camera, Circle, LatLng, Marker, PROVIDER_DEFAULT, PROVIDER_GOOGLE } from 'react-native-maps';
+import MapView, { Camera, Circle, LatLng, Marker, PROVIDER_DEFAULT, PROVIDER_GOOGLE, Region } from 'react-native-maps';
 import * as Location from 'expo-location';
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
 import { fetchRecentPosts, uploadPostMedia } from '../services/posts';
 import type { Post } from '../types/models';
-import { loadMapMode, mark2DNoticeSeen, shouldShow2DNotice, type MapMode } from '../services/mapMode';
-import { usePoplurHeavyRenderer, usePoplurPerformance } from '../performance/PoplurPerformance';
-import { PoplurPerformanceMode } from '../performance/PoplurPerformanceManager';
+import { usePoplurHeavyRenderer } from '../performance/PoplurPerformance';
 
 const toronto: LatLng = { latitude: 43.6532, longitude: -79.3832 };
 const earthRadiusKm = 6371;
+const threeDimensionalEnterZoom = 14;
+const threeDimensionalExitZoom = 13.5;
+
+type MapDimension = '2d' | '3d';
 
 const worldCamera: Camera = {
   center: { latitude: 18, longitude: -100 },
@@ -21,18 +23,30 @@ const worldCamera: Camera = {
   zoom: 1
 };
 
-function locationCamera(coordinate: LatLng, mode: MapMode): Partial<Camera> {
+function locationCamera(coordinate: LatLng): Partial<Camera> {
   return {
     center: coordinate,
     altitude: Platform.OS === 'ios' ? 900 : undefined,
-    heading: mode === '2d' ? 0 : 28,
-    pitch: mode === '2d' ? 0 : Platform.OS === 'ios' ? 68 : 58,
+    heading: 28,
+    pitch: Platform.OS === 'ios' ? 58 : 52,
     zoom: Platform.OS === 'android' ? 18 : undefined
   };
 }
 
+function approximateZoom(region: Region): number {
+  return Math.log2(360 / Math.max(region.longitudeDelta, 0.000001));
+}
+
+function dimensionForRegion(region: Region, current: MapDimension): MapDimension {
+  const zoom = approximateZoom(region);
+  if (current === '2d' && zoom >= threeDimensionalEnterZoom) return '3d';
+  if (current === '3d' && zoom <= threeDimensionalExitZoom) return '2d';
+  return current;
+}
+
 export function MapScreen() {
   const mapRef = useRef<MapView | null>(null);
+  const mapDimensionRef = useRef<MapDimension>('2d');
   const { width, height } = useWindowDimensions();
   const autoZoomedRef = useRef(false);
   const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -43,23 +57,17 @@ export function MapScreen() {
   const [mapReady, setMapReady] = useState(false);
   const [mapReadyGeneration, setMapReadyGeneration] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  const [mapMode, setMapMode] = useState<MapMode>('3d');
-  const performance = usePoplurPerformance();
+  const [mapDimension, setMapDimension] = useState<MapDimension>('2d');
   const ownsMapRenderer = usePoplurHeavyRenderer(
     'native-map-surface',
     true,
     { priority: 90, decorative: false },
   );
-  const effectiveMapMode: MapMode = performance.mode === PoplurPerformanceMode.LOW_POWER
-    || performance.mode === PoplurPerformanceMode.EMERGENCY
-    ? '2d'
-    : mapMode;
-
   const mappedPosts = useMemo(() => posts.filter(post => post.latitude != null && post.longitude != null), [posts]);
   const totalViews = useMemo(() => mappedPosts.reduce((sum, post) => sum + post.viewCount, 0), [mappedPosts]);
   const radiusKm = selected ? Math.max(0, Math.round(distanceKm(currentLocation ?? toronto, selected))) : 0;
   const isAndroid = Platform.OS === 'android';
-  const mapType = effectiveMapMode === '2d' ? 'standard' : Platform.OS === 'ios' ? 'hybridFlyover' : 'hybrid';
+  const mapType = mapDimension === '2d' ? 'standard' : Platform.OS === 'ios' ? 'hybridFlyover' : 'hybrid';
   const responsive = useMemo(() => {
     const shortSide = Math.min(width, height);
     const isTablet = shortSide >= 600;
@@ -102,24 +110,30 @@ export function MapScreen() {
     }
   }, []);
 
+  const commitMapDimension = useCallback((next: MapDimension) => {
+    if (mapDimensionRef.current === next) return false;
+    mapDimensionRef.current = next;
+    setMapDimension(next);
+    return true;
+  }, []);
+
   const flyToLocation = useCallback((coordinate: LatLng, duration = 2600) => {
-    mapRef.current?.animateCamera(locationCamera(coordinate, effectiveMapMode), { duration });
-  }, [effectiveMapMode]);
+    commitMapDimension('3d');
+    mapRef.current?.animateCamera(locationCamera(coordinate), { duration });
+  }, [commitMapDimension]);
+
+  const syncDimensionToRegion = useCallback((region: Region) => {
+    const next = dimensionForRegion(region, mapDimensionRef.current);
+    if (!commitMapDimension(next)) return;
+    mapRef.current?.animateCamera(
+      next === '3d'
+        ? { heading: 28, pitch: Platform.OS === 'ios' ? 58 : 52 }
+        : { heading: 0, pitch: 0 },
+      { duration: 320 },
+    );
+  }, [commitMapDimension]);
 
   useEffect(() => { load(); }, [load]);
-
-  useEffect(() => {
-    loadMapMode().then(async ({ mode, automatic }) => {
-      setMapMode(mode);
-      if (mode === '2d' && automatic && await shouldShow2DNotice()) {
-        Alert.alert(
-          'Poplur Map is using 2D',
-          'This phone may not run the 3D Poplur Map smoothly. The faster clay 2D map keeps the same posts and map tools. You can try 3D in Settings.',
-          [{ text: 'OK', onPress: () => { mark2DNoticeSeen(); } }]
-        );
-      }
-    });
-  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -180,6 +194,7 @@ export function MapScreen() {
   }
 
   function resetToGlobe() {
+    commitMapDimension('2d');
     mapRef.current?.animateCamera(worldCamera, { duration: 1200 });
     if (resetTimerRef.current) clearTimeout(resetTimerRef.current);
     resetTimerRef.current = setTimeout(() => {
@@ -204,7 +219,7 @@ export function MapScreen() {
       loadingBackgroundColor="#000"
       loadingIndicatorColor="#fff"
       moveOnMarkerPress={false}
-      showsBuildings={effectiveMapMode === '3d'}
+      showsBuildings={mapDimension === '3d'}
       showsCompass={false}
       showsMyLocationButton={false}
       showsPointsOfInterest
@@ -214,9 +229,11 @@ export function MapScreen() {
         // A background release creates a brand-new native map. Track each
         // ready callback even if React has not yet committed mapReady=false.
         autoZoomedRef.current = false;
+        commitMapDimension('2d');
         setMapReady(true);
         setMapReadyGeneration(generation => generation + 1);
       }}
+      onRegionChangeComplete={syncDimensionToRegion}
       onPress={event => setSelected(event.nativeEvent.coordinate)}
     >
       {mappedPosts.map((post, index) => <React.Fragment key={post.id}>

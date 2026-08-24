@@ -30,6 +30,7 @@ import {
 } from '../performance/PoplurPerformanceManager';
 import { initializeFeedGoogleAds, presentFeedGoogleAd } from '../services/feedAds';
 import { handleStoreCheckoutRequested } from '../services/storeCheckout';
+import { NativeWebCallSignalling } from '../services/webCallSignalling';
 
 // Post-login HOME web embed (RN parity with iOS/Android Phase 3).
 //
@@ -113,6 +114,13 @@ type ClayMessage = {
   index?: number;
   sequence?: number;
   control?: string;
+  otherId?: string;
+  callerName?: string;
+  callId?: string;
+  sdpType?: string;
+  sdp?: string;
+  candidate?: Record<string, unknown>;
+  video?: boolean;
   scope?: 'once' | 'whileUsing';
   permission?: PrimerPermission;
   granted?: boolean;
@@ -215,6 +223,7 @@ export function PostLoginHomeWebScreen({
   const injectedShellRef = useRef(`${RN_NATIVE_SHELL}\n${createWebPerformanceBootstrap(runtimeSnapshot)}`);
   const captureSessionPrefixRef = useRef(`temporary:home-capture:${Date.now()}-${Math.random().toString(36).slice(2)}:`);
   const captureCacheKeysRef = useRef(new Map<string, CaptureCacheRecord>());
+  const callSignallingRef = useRef<NativeWebCallSignalling | null>(null);
 
   const pushPerformancePolicy = useCallback(() => {
     webViewRef.current?.injectJavaScript(createWebPerformanceUpdate(runtimeSnapshot));
@@ -726,6 +735,17 @@ export function PostLoginHomeWebScreen({
     webViewRef.current?.injectJavaScript(`window.postMessage(${json}, '*'); true;`);
   }, []);
 
+  useEffect(() => {
+    // The page owns WebRTC media and its FaceTime UI; RN owns Firestore and
+    // hands the page the exact poplurCall* messages iOS/Android deliver.
+    const signalling = new NativeWebCallSignalling(postToWeb);
+    callSignallingRef.current = signalling;
+    return () => {
+      signalling.stopAll();
+      if (callSignallingRef.current === signalling) callSignallingRef.current = null;
+    };
+  }, [postToWeb]);
+
   const runStoreCheckout = useCallback(async (message: ClayMessage) => {
     const result = await handleStoreCheckoutRequested(message);
     postToWeb(result);
@@ -738,6 +758,15 @@ export function PostLoginHomeWebScreen({
       if (message.type === 'requestProfile') void sendProfileToWeb();
       if (message.type === 'requestProfilePosts') void sendProfilePostsToWeb();
       if (message.type === 'requestNearbyTracks') void sendNearbyTracksToWeb(message);
+      if (message.type === 'callStart'
+        || message.type === 'callAccept'
+        || message.type === 'callDescription'
+        || message.type === 'callCandidate'
+        || message.type === 'callEnd'
+        || message.type === 'callDecline'
+        || message.type === 'callWatchIncoming') {
+        callSignallingRef.current?.handle(message);
+      }
       if (message.type === 'openInAppBrowser') void openInAppBrowser(message.url);
       if (message.type === 'permissionHandled'
         && (message.permission === 'location' || message.permission === 'photos')) {
@@ -847,6 +876,10 @@ export function PostLoginHomeWebScreen({
           onLoadEnd={pushPerformancePolicy}
           allowsInlineMediaPlayback
           mediaPlaybackRequiresUserAction={false}
+          // The page still needs the normal OS camera/microphone grant. Once
+          // granted, let WKWebView carry that same decision into FaceTime's
+          // getUserMedia request rather than presenting a second web prompt.
+          mediaCapturePermissionGrantType="grant"
           javaScriptEnabled
           domStorageEnabled
         />
