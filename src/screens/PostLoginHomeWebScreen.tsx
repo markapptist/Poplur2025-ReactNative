@@ -251,12 +251,22 @@ export function PostLoginHomeWebScreen({
     try {
       const profile = await getCurrentProfile();
       const username = profile?.username?.trim();
-      if (!username) return;
+      const photo = validatedHttpsUrl(profile?.photoURL);
       const payload = JSON.stringify({
-        username,
-        business: profile?.accountType === 'business'
-      });
-      webViewRef.current?.injectJavaScript(`window.poplurProfile && window.poplurProfile(${payload}); true;`);
+        ...(username ? { username } : {}),
+        business: profile?.accountType === 'business',
+        ...(photo ? { photo } : {}),
+      })
+        .replace(/</g, '\\u003c')
+        .replace(/>/g, '\\u003e')
+        .replace(/&/g, '\\u0026');
+      // ProfileTwin owns the shipping profile UI and listens to this event.
+      // Calling only the legacy global updated neither its React state nor the
+      // avatar after a pull-to-refresh.
+      webViewRef.current?.injectJavaScript(
+        `window.poplurProfile?.(${payload});` +
+          `window.dispatchEvent(new CustomEvent('poplur-native-profile',{detail:${payload}}));true;`,
+      );
     } catch (error) {
       console.warn('[PostLoginHomeWebScreen] profile bridge failed', error);
     }

@@ -27,12 +27,17 @@ export async function getCurrentProfile(): Promise<UserProfile | null> {
     return profile;
   }
   const data = snap.data();
+  const photoURL = [data.profilePictureURL, data.avatarUrl, data.photoURL, user.photoURL]
+    .find(value => typeof value === 'string' && value.trim()) as string | undefined;
   return {
     uid: user.uid,
     username: data.username ?? user.displayName ?? 'Poplur user',
     email: data.email ?? user.email ?? '',
     accountType: data.accountType === 'business' ? 'business' : 'personal',
-    photoURL: data.photoURL,
+    // `profilePictureURL` is the canonical field written by the current iOS
+    // and Android profile capture paths. Keep the older names readable so an
+    // existing account refreshes correctly regardless of where it was made.
+    photoURL,
     bio: data.bio ?? ''
   };
 }
