@@ -10,10 +10,11 @@ import { StatusBar } from 'expo-status-bar';
 import Server from '@dr.pogodin/react-native-static-server';
 import { unzip } from 'react-native-zip-archive';
 import WebView, { WebViewMessageEvent } from 'react-native-webview';
+import { collection, getDocs, limit, query } from 'firebase/firestore';
 import { PreloginWebScreen } from './PreloginWebScreen';
 import { getCurrentProfile } from '../services/profile';
 import { fetchMyPosts, uploadPostMedia } from '../services/posts';
-import { auth } from '../services/firebase';
+import { auth, db } from '../services/firebase';
 import {
   getHandledPermissionPrimers,
   markPermissionPrimerHandled,
@@ -435,6 +436,107 @@ export function PostLoginHomeWebScreen({
     }
   }, [dispatchToClay]);
 
+  const sendNearbyTracksToWeb = useCallback(async (message: ClayMessage) => {
+    const requestId = typeof message.requestId === 'string' ? message.requestId : '';
+    const latitude = typeof message.latitude === 'number' ? message.latitude : Number.NaN;
+    const longitude = typeof message.longitude === 'number' ? message.longitude : Number.NaN;
+    if (!requestId
+      || !Number.isFinite(latitude)
+      || !Number.isFinite(longitude)
+      || Math.abs(latitude) > 90
+      || Math.abs(longitude) > 180) {
+      if (requestId) {
+        dispatchToClay('poplur-native-nearby-tracks', { requestId, tracks: [] });
+      }
+      return;
+    }
+
+    const requestedRadius = typeof message.radiusKm === 'number' ? message.radiusKm : Number.NaN;
+    const radiusKm = Number.isFinite(requestedRadius)
+      ? Math.min(2_000, Math.max(1, requestedRadius))
+      : 120;
+    const numberValue = (value: unknown): number | null => {
+      return typeof value === 'number' && Number.isFinite(value) ? value : null;
+    };
+    const textValue = (value: unknown): string | null => {
+      if (typeof value !== 'string') return null;
+      const text = value.trim();
+      return text || null;
+    };
+    const distanceKm = (otherLatitude: number, otherLongitude: number) => {
+      const toRadians = (value: number) => value * Math.PI / 180;
+      const latitudeDelta = toRadians(otherLatitude - latitude);
+      const longitudeDelta = toRadians(otherLongitude - longitude);
+      const latitude1 = toRadians(latitude);
+      const latitude2 = toRadians(otherLatitude);
+      const haversine = Math.sin(latitudeDelta / 2) ** 2
+        + Math.cos(latitude1) * Math.cos(latitude2)
+        * Math.sin(longitudeDelta / 2) ** 2;
+      return 6_371 * 2 * Math.asin(Math.min(1, Math.sqrt(haversine)));
+    };
+    const createdAtMillis = (data: Record<string, unknown>) => {
+      const explicit = numberValue(data.createdAtMillis);
+      if (explicit !== null) return explicit;
+      const timestamp = data.createdAt as { toMillis?: () => number } | undefined;
+      if (typeof timestamp?.toMillis !== 'function') return 0;
+      try {
+        const millis = timestamp.toMillis();
+        return Number.isFinite(millis) ? millis : 0;
+      } catch {
+        return 0;
+      }
+    };
+
+    try {
+      const snapshot = await getDocs(query(collection(db, 'tracks'), limit(256)));
+      const tracks = snapshot.docs.flatMap(document => {
+        const data = document.data() as Record<string, unknown>;
+        // Only Poplur-hosted audio belongs on this shelf. A SoundCloud
+        // permalink (or any non-HTTPS pointer) must stay in its attributed
+        // external-player path rather than being decoded as Poplur media.
+        const audioURL = validatedHttpsUrl(data.audioURL);
+        const trackLatitude = numberValue(data.lat);
+        const trackLongitude = numberValue(data.lng);
+        if (!audioURL
+          || trackLatitude === null
+          || trackLongitude === null
+          || Math.abs(trackLatitude) > 90
+          || Math.abs(trackLongitude) > 180) return [];
+
+        const distance = distanceKm(trackLatitude, trackLongitude);
+        if (distance > radiusKm) return [];
+
+        const row: Record<string, unknown> = {
+          id: document.id,
+          title: textValue(data.title) ?? 'Untitled',
+          url: audioURL,
+          lat: trackLatitude,
+          lng: trackLongitude,
+          distanceKm: distance,
+          place: textValue(data.place) ?? `${distance.toFixed(1)} km away`,
+          postedAt: createdAtMillis(data),
+          postedBy: textValue(data.postedBy) ?? textValue(data.userID) ?? 'Poplur artist',
+        };
+        for (const key of ['artist', 'licence', 'mood'] as const) {
+          const value = textValue(data[key]);
+          if (value) row[key] = value;
+        }
+        for (const key of ['bpm', 'duration'] as const) {
+          const value = numberValue(data[key]);
+          if (value !== null) row[key] = value;
+        }
+        return [{ distance, row }];
+      })
+        .sort((a, b) => a.distance - b.distance)
+        .map(result => result.row);
+
+      dispatchToClay('poplur-native-nearby-tracks', { requestId, tracks });
+    } catch (error) {
+      console.warn('[PostLoginHomeWebScreen] nearby tracks bridge failed', error);
+      dispatchToClay('poplur-native-nearby-tracks', { requestId, tracks: [] });
+    }
+  }, [dispatchToClay]);
+
   const markHomeReady = useCallback(() => {
     homeReadyRef.current = true;
     setHomeReady(true);
@@ -635,6 +737,7 @@ export function PostLoginHomeWebScreen({
       if (message.type === 'homeReady' || message.type === 'mapReady') markHomeReady();
       if (message.type === 'requestProfile') void sendProfileToWeb();
       if (message.type === 'requestProfilePosts') void sendProfilePostsToWeb();
+      if (message.type === 'requestNearbyTracks') void sendNearbyTracksToWeb(message);
       if (message.type === 'openInAppBrowser') void openInAppBrowser(message.url);
       if (message.type === 'permissionHandled'
         && (message.permission === 'location' || message.permission === 'photos')) {
