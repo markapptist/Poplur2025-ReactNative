@@ -43,8 +43,9 @@ export function MapScreen() {
       await uploadPostMedia({
         uri: asset.uri,
         mediaType: asset.type === 'video' ? 'video' : 'photo',
-        latitude: selected.latitude,
-        longitude: selected.longitude,
+        targetLatitude: selected.latitude,
+        targetLongitude: selected.longitude,
+        locationVisibility: 'approximate',
         sizeBytes: asset.fileSize
       });
       await load();
@@ -89,7 +90,7 @@ export function MapScreen() {
 
       <View style={styles.panel}>
         <Text style={styles.panelTitle}>Map posts</Text>
-        <Text style={styles.panelText}>{selected.latitude.toFixed(5)}, {selected.longitude.toFixed(5)}</Text>
+        <Text style={styles.panelText}>Selected map point</Text>
         <Pressable style={styles.button} onPress={chooseMediaForMap} disabled={uploading}>
           <Ionicons name="cloud-upload" color="white" size={20} />
           <Text style={styles.buttonText}>{uploading ? 'Posting...' : 'Choose media & post'}</Text>

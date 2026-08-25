@@ -96,8 +96,8 @@ function FeedPost({ post, index, totalPosts, height, active }: { post: Post; ind
   const radiusKm = Math.max(1, Math.round(post.radius / 1000));
   const username = post.username?.replace(/^@/, '') || 'poplur_user';
   const location = post.latitude !== undefined && post.longitude !== undefined
-    ? `${post.latitude.toFixed(4)}, ${post.longitude.toFixed(4)}`
-    : 'Profile post';
+    ? 'Approximate map area'
+    : 'No public map origin';
 
   return (
     <View style={[styles.post, { height }]}>

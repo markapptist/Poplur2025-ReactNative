@@ -1,4 +1,4 @@
-import { addDoc, collection, doc, getDocs, increment, limit, orderBy, query, serverTimestamp, updateDoc, where } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, increment, limit, orderBy, query, serverTimestamp, updateDoc, where, writeBatch } from 'firebase/firestore';
 import { getDownloadURL, ref, uploadBytesResumable } from 'firebase/storage';
 import { auth, db, storage } from './firebase';
 import type { Post } from '../types/models';
@@ -32,8 +32,10 @@ export async function incrementPostView(post: Post) {
 export async function uploadPostMedia(params: {
   uri: string;
   mediaType: 'photo' | 'video' | 'photo_profile' | 'video_profile';
-  latitude?: number;
-  longitude?: number;
+  postId?: string;
+  targetLatitude?: number;
+  targetLongitude?: number;
+  locationVisibility?: 'approximate' | 'hidden';
   caption?: string;
   channelId?: string;
   filterId?: string;
@@ -122,16 +124,47 @@ export async function uploadPostMedia(params: {
     createdAt: serverTimestamp()
   };
 
-  if (params.latitude !== undefined && params.longitude !== undefined) {
-    data.latitude = params.latitude;
-    data.longitude = params.longitude;
+  const hasTarget = Number.isFinite(params.targetLatitude)
+    && Number.isFinite(params.targetLongitude)
+    && Math.abs(params.targetLatitude!) <= 90
+    && Math.abs(params.targetLongitude!) <= 180;
+  const accountSnapshot = await getDoc(doc(db, 'users', user.uid));
+  const account = accountSnapshot.data();
+  const accountHidesOrigin = account?.privateAccount === true || account?.ghostMode === true;
+  const locationVisibility = hasTarget && !accountHidesOrigin && params.locationVisibility !== 'hidden'
+    ? 'approximate'
+    : 'hidden';
+  data.audience = 'public';
+  data.locationVisibility = locationVisibility;
+  if (locationVisibility === 'approximate') {
+    const latitudeCell = Math.round(params.targetLatitude! * 1_000);
+    const longitudeCell = Math.round(params.targetLongitude! * 1_000);
+    data.latitude = latitudeCell / 1_000;
+    data.longitude = longitudeCell / 1_000;
+    data.latitudeCell = latitudeCell;
+    data.longitudeCell = longitudeCell;
   }
   if (params.caption?.trim()) data.caption = params.caption.trim();
   if (params.channelId) data.channelId = params.channelId;
   if (params.filterId) data.filterId = params.filterId;
   if (params.usedAI) data.usedAI = true;
 
-  await addDoc(postsCollection, data);
+  const boundedPostId = typeof params.postId === 'string'
+    && /^post-[a-zA-Z0-9-]{16,96}$/.test(params.postId)
+    ? params.postId
+    : null;
+  const postRef = boundedPostId ? doc(postsCollection, boundedPostId) : doc(postsCollection);
+  const batch = writeBatch(db);
+  batch.set(postRef, data);
+  if (hasTarget) {
+    batch.set(doc(db, 'users', user.uid, 'postLocations', postRef.id), {
+      latitude: params.targetLatitude,
+      longitude: params.targetLongitude,
+      createdAt: serverTimestamp(),
+      source: 'post-upload',
+    }, { merge: true });
+  }
+  await batch.commit();
   return mediaURL;
 }
 

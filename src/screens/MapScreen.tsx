@@ -184,8 +184,9 @@ export function MapScreen() {
       await uploadPostMedia({
         uri: asset.uri,
         mediaType: asset.type === 'video' ? 'video' : 'photo',
-        latitude: selected.latitude,
-        longitude: selected.longitude,
+        targetLatitude: selected.latitude,
+        targetLongitude: selected.longitude,
+        locationVisibility: 'approximate',
         sizeBytes: asset.fileSize,
       });
       setSelected(null); await load(); Alert.alert('Posted', 'Your media was posted to the map.');
