@@ -7,6 +7,7 @@ import {
   query,
   serverTimestamp,
   setDoc,
+  updateDoc,
   where,
   type Unsubscribe,
 } from 'firebase/firestore';
@@ -22,6 +23,7 @@ export type WebCallSignal = {
   sdp?: unknown;
   candidate?: unknown;
   video?: unknown;
+  requestId?: unknown;
 };
 
 type Emit = (message: Record<string, unknown>) => void;
@@ -54,7 +56,12 @@ export class NativeWebCallSignalling {
   handle(signal: WebCallSignal): void {
     switch (signal.type) {
       case 'callStart':
-        void this.startCall(text(signal.otherId), text(signal.callerName) || undefined, signal.video === true);
+        void this.startCall(
+          text(signal.otherId),
+          text(signal.callerName) || undefined,
+          signal.video === true,
+          text(signal.requestId),
+        );
         break;
       case 'callAccept':
         void this.acceptCall(text(signal.callId));
@@ -85,10 +92,10 @@ export class NativeWebCallSignalling {
     this.incomingUnsub = null;
   }
 
-  private async startCall(otherId: string, callerName: string | undefined, video: boolean): Promise<void> {
+  private async startCall(otherId: string, callerName: string | undefined, video: boolean, requestId: string): Promise<void> {
     const uid = auth.currentUser?.uid;
     if (!uid || !otherId || otherId === uid) {
-      this.emit({ type: 'poplurCallStarted', callId: '', ok: false });
+      this.emit({ type: 'poplurCallStarted', callId: '', ok: false, requestId });
       return;
     }
     const ref = doc(collection(db, 'calls'));
@@ -106,23 +113,24 @@ export class NativeWebCallSignalling {
         provider: 'webrtc',
       });
       this.observe(ref.id);
-      this.emit({ type: 'poplurCallStarted', callId: ref.id, ok: true });
+      this.emit({ type: 'poplurCallStarted', callId: ref.id, ok: true, requestId });
     } catch (error) {
       console.warn('[NativeWebCallSignalling] could not open call', error);
-      this.emit({ type: 'poplurCallStarted', callId: '', ok: false });
+      this.emit({ type: 'poplurCallStarted', callId: '', ok: false, requestId });
     }
   }
 
   private async publishDescription(callId: string, type: string, sdp: string): Promise<void> {
     if (!callId) return;
     const key = type === 'offer' ? 'offer' : 'answer';
+    // startCall already marks the rendezvous as ringing. Keep a late offer
+    // from regressing a call that the callee accepted in the meantime.
+    const payload: Record<string, unknown> = { [key]: { type, sdp } };
+    if (key === 'answer') payload.status = 'connected';
     try {
       await setDoc(
         doc(db, 'calls', callId),
-        {
-          [key]: { type, sdp },
-          status: key === 'answer' ? 'connected' : 'ringing',
-        },
+        payload,
         { merge: true },
       );
     } catch (error) {
@@ -161,7 +169,7 @@ export class NativeWebCallSignalling {
   private async declineCall(callId: string): Promise<void> {
     if (!callId) return;
     try {
-      await setDoc(doc(db, 'calls', callId), { status: 'declined' }, { merge: true });
+      await updateDoc(doc(db, 'calls', callId), { status: 'declined' });
     } catch (error) {
       console.warn('[NativeWebCallSignalling] declineCall', error);
     }
@@ -171,7 +179,7 @@ export class NativeWebCallSignalling {
     if (!callId) return;
     this.observe(callId);
     try {
-      await setDoc(doc(db, 'calls', callId), { status: 'connected' }, { merge: true });
+      await updateDoc(doc(db, 'calls', callId), { status: 'connected' });
     } catch (error) {
       console.warn('[NativeWebCallSignalling] acceptCall', error);
     }
@@ -233,6 +241,10 @@ export class NativeWebCallSignalling {
       ),
       snapshot => {
         snapshot.docChanges().forEach(change => {
+          if (change.type === 'removed') {
+            this.emit({ type: 'poplurCallIncomingUnavailable', callId: change.doc.id });
+            return;
+          }
           if (change.type !== 'added') return;
           const data = change.doc.data();
           if (data.provider !== 'webrtc') return;

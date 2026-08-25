@@ -11,11 +11,12 @@ import { StatusBar } from 'expo-status-bar';
 import Server from '@dr.pogodin/react-native-static-server';
 import { unzip } from 'react-native-zip-archive';
 import WebView, { WebViewMessageEvent } from 'react-native-webview';
-import { collection, getDocs, limit, query } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, limit, query } from 'firebase/firestore';
+import { httpsCallable } from 'firebase/functions';
 import { PreloginWebScreen } from './PreloginWebScreen';
 import { getCurrentProfile } from '../services/profile';
 import { fetchMyPosts, uploadPostMedia } from '../services/posts';
-import { auth, db } from '../services/firebase';
+import { auth, db, functions } from '../services/firebase';
 import {
   getHandledPermissionPrimers,
   markPermissionPrimerHandled,
@@ -50,7 +51,7 @@ import { NativeWebCallSignalling } from '../services/webCallSignalling';
 // homeReady).
 
 // Bump when the staged claymap.zip changes so devices re-extract.
-const BUNDLE_VERSION = '93';
+const BUNDLE_VERSION = '94';
 
 const CLAYMAP_ZIP = require('../assets/claymap/claymap.zip');
 const WEB_HOME_ORIGIN = 'http://127.0.0.1:5173';
@@ -136,6 +137,7 @@ async function prepareBundle(): Promise<string> {
 type ClayMessage = {
   type?: string;
   requestId?: string;
+  postId?: string;
   kind?: 'photo' | 'video';
   data?: string;
   caption?: string;
@@ -144,6 +146,11 @@ type ClayMessage = {
   usedAI?: boolean;
   latitude?: number;
   longitude?: number;
+  targetLatitude?: number;
+  targetLongitude?: number;
+  locationVisibility?: 'approximate' | 'hidden';
+  privateAccount?: boolean;
+  ghostMode?: boolean;
   radiusKm?: number;
   index?: number;
   sequence?: number;
@@ -332,6 +339,54 @@ export function PostLoginHomeWebScreen({
       console.warn('[PostLoginHomeWebScreen] profile bridge failed', error);
     }
   };
+
+  async function sendAccountPrivacyToWeb() {
+    const user = auth.currentUser;
+    if (!user) {
+      dispatchToClay('poplur-native-account-privacy', {
+        privateAccount: false,
+        ghostMode: false,
+        ok: false,
+        message: 'Sign in to load privacy.',
+      });
+      return;
+    }
+    try {
+      const snapshot = await getDoc(doc(db, 'users', user.uid));
+      const data = snapshot.data();
+      await changeAccountPrivacy({
+        privateAccount: data?.privateAccount === true,
+        ghostMode: data?.ghostMode === true,
+      });
+    } catch (error) {
+      dispatchToClay('poplur-native-account-privacy', {
+        privateAccount: false,
+        ghostMode: false,
+        ok: false,
+        message: error instanceof Error ? error.message : 'Privacy could not be loaded.',
+      });
+    }
+  }
+
+  async function changeAccountPrivacy(message: ClayMessage) {
+    const privateAccount = message.privateAccount === true;
+    const ghostMode = message.ghostMode === true;
+    try {
+      const callable = httpsCallable<
+        { privateAccount: boolean; ghostMode: boolean },
+        { privateAccount: boolean; ghostMode: boolean }
+      >(functions, 'setAccountLocationPrivacy');
+      const result = await callable({ privateAccount, ghostMode });
+      dispatchToClay('poplur-native-account-privacy', { ...result.data, ok: true });
+    } catch (error) {
+      dispatchToClay('poplur-native-account-privacy', {
+        privateAccount,
+        ghostMode,
+        ok: false,
+        message: error instanceof Error ? error.message : 'Privacy could not be saved.',
+      });
+    }
+  }
 
   useEffect(() => {
     let active = true;
@@ -728,9 +783,11 @@ export function PostLoginHomeWebScreen({
       await uploadPostMedia({
         uri: message.data,
         mediaType: kind,
+        postId: message.postId,
         sizeBytes: captureRecord?.sizeBytes,
-        latitude: Number.isFinite(message.latitude) ? message.latitude : undefined,
-        longitude: Number.isFinite(message.longitude) ? message.longitude : undefined,
+        targetLatitude: Number.isFinite(message.targetLatitude) ? message.targetLatitude : undefined,
+        targetLongitude: Number.isFinite(message.targetLongitude) ? message.targetLongitude : undefined,
+        locationVisibility: message.locationVisibility === 'hidden' ? 'hidden' : 'approximate',
         caption: message.caption,
         channelId: message.channelId,
         filterId: message.filterId,
@@ -817,6 +874,8 @@ export function PostLoginHomeWebScreen({
       const message = JSON.parse(event.nativeEvent.data) as ClayMessage;
       if (message.type === 'homeReady' || message.type === 'mapReady') markHomeReady();
       if (message.type === 'requestProfile') void sendProfileToWeb();
+      if (message.type === 'requestAccountPrivacy') void sendAccountPrivacyToWeb();
+      if (message.type === 'accountPrivacyChanged') void changeAccountPrivacy(message);
       if (message.type === 'requestProfilePosts') void sendProfilePostsToWeb();
       if (message.type === 'requestNearbyTracks') void sendNearbyTracksToWeb(message);
       if (message.type === 'radioScope'
