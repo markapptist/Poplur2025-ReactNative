@@ -11,7 +11,7 @@ import { StatusBar } from 'expo-status-bar';
 import Server from '@dr.pogodin/react-native-static-server';
 import { unzip } from 'react-native-zip-archive';
 import WebView, { WebViewMessageEvent } from 'react-native-webview';
-import { collection, doc, getDoc, getDocs, limit, query } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, limit, orderBy, query } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { PreloginWebScreen } from './PreloginWebScreen';
 import { getCurrentProfile } from '../services/profile';
@@ -551,6 +551,69 @@ export function PostLoginHomeWebScreen({
     }
   }, [dispatchToClay]);
 
+  const sendFeedPostsToWeb = useCallback(async () => {
+    if (!auth.currentUser?.uid) return;
+    try {
+      const snapshot = await getDocs(query(
+        collection(db, 'posts'),
+        orderBy('createdAt', 'desc'),
+        limit(96),
+      ));
+      const rows = snapshot.docs.flatMap(document => {
+        const data = document.data() as Record<string, unknown>;
+        if ((typeof data.audience === 'string' ? data.audience : 'public') !== 'public') return [];
+        if ((typeof data.status === 'string' ? data.status : 'published') !== 'published') return [];
+        const mediaURL = validatedHttpsUrl(data.playbackURL) ?? validatedHttpsUrl(data.mediaURL);
+        if (!mediaURL) return [];
+        const numberValue = (value: unknown): number | undefined => {
+          const number = Number(value);
+          return Number.isFinite(number) ? number : undefined;
+        };
+        const textValue = (value: unknown, limitValue: number): string | undefined => {
+          if (typeof value !== 'string') return undefined;
+          const text = value.trim().slice(0, limitValue);
+          return text || undefined;
+        };
+        const timestamp = data.createdAt as { toMillis?: () => number } | undefined;
+        const createdAtMillis = numberValue(data.createdAtMillis) ?? timestamp?.toMillis?.() ?? 0;
+        const row: Record<string, unknown> = {
+          id: document.id,
+          mediaURL,
+          mediaType: data.mediaType === 'photo' ? 'photo' : 'video',
+          username: textValue(data.username, 40) ?? 'Poplur user',
+          channelId: textValue(data.channelId, 40) ?? 'live',
+          createdAtMillis,
+        };
+        const posterURL = validatedHttpsUrl(data.posterURL);
+        if (posterURL) row.posterURL = posterURL;
+        const caption = textValue(data.caption, 2_000);
+        if (caption) row.caption = caption;
+        const radiusMeters = numberValue(data.radius);
+        if (radiusMeters != null) row.radiusMeters = Math.max(0, radiusMeters);
+        for (const key of ['viewCount', 'likeCount', 'commentCount', 'shareCount'] as const) {
+          const value = numberValue(data[key]);
+          if (value != null) row[key] = Math.max(0, Math.round(value));
+        }
+        if (data.locationVisibility === 'hidden') {
+          row.locationVisibility = 'hidden';
+        } else if (data.locationVisibility === 'approximate') {
+          const latitude = numberValue(data.latitude);
+          const longitude = numberValue(data.longitude);
+          if (latitude != null && longitude != null
+            && Math.abs(latitude) <= 90 && Math.abs(longitude) <= 180) {
+            row.locationVisibility = 'approximate';
+            row.originLatitude = latitude;
+            row.originLongitude = longitude;
+          }
+        }
+        return [row];
+      });
+      dispatchToClay('poplur-native-feed-posts', { posts: rows });
+    } catch (error) {
+      console.warn('[PostLoginHomeWebScreen] feed posts bridge failed', error);
+    }
+  }, [dispatchToClay]);
+
   const sendNearbyTracksToWeb = useCallback(async (message: ClayMessage) => {
     const requestId = typeof message.requestId === 'string' ? message.requestId : '';
     const latitude = typeof message.latitude === 'number' ? message.latitude : Number.NaN;
@@ -877,6 +940,7 @@ export function PostLoginHomeWebScreen({
       if (message.type === 'requestAccountPrivacy') void sendAccountPrivacyToWeb();
       if (message.type === 'accountPrivacyChanged') void changeAccountPrivacy(message);
       if (message.type === 'requestProfilePosts') void sendProfilePostsToWeb();
+      if (message.type === 'requestFeedPosts') void sendFeedPostsToWeb();
       if (message.type === 'requestNearbyTracks') void sendNearbyTracksToWeb(message);
       if (message.type === 'radioScope'
         && (message.scope === 'screen' || message.scope === 'app' || message.scope === 'outside')) {
