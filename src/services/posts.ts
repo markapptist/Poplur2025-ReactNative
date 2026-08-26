@@ -1,5 +1,5 @@
 import { collection, doc, getDoc, getDocs, increment, limit, orderBy, query, serverTimestamp, updateDoc, where, writeBatch } from 'firebase/firestore';
-import { deleteObject, getDownloadURL, ref, uploadBytesResumable } from 'firebase/storage';
+import { getDownloadURL, ref, uploadBytesResumable } from 'firebase/storage';
 import { auth, db, storage } from './firebase';
 import type { Post } from '../types/models';
 import { poplurAssetCache } from '../performance/PoplurAssetCache';
@@ -41,34 +41,12 @@ export async function uploadPostMedia(params: {
   filterId?: string;
   usedAI?: boolean;
   radiusMeters?: number;
-  contentType?: 'post' | 'story';
-  audience?: 'public' | 'favorites';
-  expiresAtMillis?: number;
-  repliesAllowed?: boolean;
-  mentions?: string[];
-  storySticker?: string;
-  storyMusic?: { title?: string; artist?: string };
-  storyPoll?: { question?: string; options?: string[] };
   rightsAttestationVersion?: string;
   sizeBytes?: number;
   onProgress?: (progress: number) => void;
 }) {
   const user = auth.currentUser;
   if (!user) throw new Error('You must be signed in before posting.');
-  const storyAudience = params.contentType === 'story' && params.audience === 'favorites'
-    ? 'favorites'
-    : 'public';
-  const storyFavoriteIds = params.contentType === 'story' && storyAudience === 'favorites'
-    ? (await getDocs(query(
-        collection(db, 'users', user.uid, 'phoneFavourites'),
-        limit(50),
-      ))).docs.map(document => document.id)
-    : [];
-  if (params.contentType === 'story'
-    && storyAudience === 'favorites'
-    && storyFavoriteIds.length === 0) {
-    throw new Error('Add someone to Poplur Phone Favorites before sharing a Favorites Story.');
-  }
 
   const isVideo = params.mediaType.includes('video');
   const encodedBytes = await verifiedMediaSize(
@@ -106,7 +84,6 @@ export async function uploadPostMedia(params: {
   }
 
   let mediaURL: string;
-  let uploadedReference: ReturnType<typeof ref> | null = null;
   let uploadedStoragePath: string | null = null;
   try {
     const response = await fetch(params.uri);
@@ -128,7 +105,6 @@ export async function uploadPostMedia(params: {
     const storagePath = `posts/${user.uid}/${stableBasename}.${extension}`;
     uploadedStoragePath = storagePath;
     const storageRef = ref(storage, storagePath);
-    uploadedReference = storageRef;
     task = uploadBytesResumable(storageRef, blob);
     mediaURL = await new Promise<string>((resolve, reject) => {
       task!.on('state_changed', snapshot => {
@@ -163,65 +139,6 @@ export async function uploadPostMedia(params: {
     ? params.postId
     : null;
 
-  if (params.contentType === 'story') {
-    const storyId = boundedPostId ?? `post-${Date.now()}-${Math.random().toString(36).slice(2, 18)}`;
-    const story: Record<string, unknown> = {
-      ownerID: user.uid,
-      username: user.displayName ?? user.email ?? 'Poplur user',
-      mediaURL,
-      playbackURL: mediaURL,
-      ...(uploadedStoragePath ? { mediaStoragePath: uploadedStoragePath } : {}),
-      mediaType: isVideo ? 'video' : 'photo',
-      audience: storyAudience,
-      audienceUserIds: storyFavoriteIds,
-      locationVisibility: 'hidden',
-      repliesAllowed: params.repliesAllowed !== false,
-      highlighted: false,
-      processingStatus: 'ready',
-      status: 'published',
-      schemaVersion: 1,
-      createdAt: serverTimestamp(),
-      createdAtMillis: nowMillis,
-      expiresAt: new Date(nowMillis + 24 * 60 * 60 * 1000),
-      expiresAtMillis: nowMillis + 24 * 60 * 60 * 1000,
-      mentions: [...new Set((params.mentions ?? [])
-        .map(value => value.trim().toLowerCase())
-        .filter(value => /^@[a-z0-9_.]{1,39}$/.test(value)))].slice(0, 12),
-    };
-    if (params.caption?.trim()) story.caption = params.caption.trim().slice(0, 2000);
-    if (params.storySticker && ['heart', 'here', 'live', 'hype', 'call'].includes(params.storySticker)) {
-      story.sticker = params.storySticker;
-    }
-    const title = params.storyMusic?.title?.trim().slice(0, 100);
-    if (title) {
-      story.music = {
-        title,
-        ...(params.storyMusic?.artist?.trim()
-          ? { artist: params.storyMusic.artist.trim().slice(0, 80) }
-          : {}),
-      };
-    }
-    const question = params.storyPoll?.question?.trim().slice(0, 160);
-    const options = (params.storyPoll?.options ?? [])
-      .map(value => value.trim().slice(0, 80)).filter(Boolean).slice(0, 4);
-    if (question && options.length >= 2) {
-      story.poll = { question, options, counts: options.map(() => 0) };
-    }
-    if (params.rightsAttestationVersion?.trim()) {
-      story.rightsAttestationVersion = params.rightsAttestationVersion.trim().slice(0, 80);
-      story.rightsAttestedAtMillis = nowMillis;
-    }
-    const storyBatch = writeBatch(db);
-    storyBatch.set(doc(db, 'stories', storyId), story);
-    try {
-      await storyBatch.commit();
-    } catch (error) {
-      if (uploadedReference) await deleteObject(uploadedReference).catch(() => undefined);
-      throw error;
-    }
-    return mediaURL;
-  }
-
   const hasTarget = Number.isFinite(params.targetLatitude)
     && Number.isFinite(params.targetLongitude)
     && Math.abs(params.targetLatitude!) <= 90
@@ -246,6 +163,10 @@ export async function uploadPostMedia(params: {
   if (params.channelId) data.channelId = params.channelId;
   if (params.filterId) data.filterId = params.filterId;
   if (params.usedAI) data.usedAI = true;
+  if (params.rightsAttestationVersion?.trim()) {
+    data.rightsAttestationVersion = params.rightsAttestationVersion.trim().slice(0, 80);
+    data.rightsAttestedAtMillis = nowMillis;
+  }
 
   const postRef = boundedPostId ? doc(postsCollection, boundedPostId) : doc(postsCollection);
   const batch = writeBatch(db);

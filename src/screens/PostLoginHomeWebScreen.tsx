@@ -17,13 +17,6 @@ import { PreloginWebScreen } from './PreloginWebScreen';
 import { getCurrentProfile } from '../services/profile';
 import { fetchMyPosts, uploadPostMedia } from '../services/posts';
 import {
-  fetchStories,
-  reactToStory,
-  replyToStory,
-  setStoryHighlighted,
-  voteOnStory,
-} from '../services/stories';
-import {
   closeDMThread,
   hideDMThread,
   observeDMThread,
@@ -161,14 +154,6 @@ type ClayMessage = {
   usedAI?: boolean;
   rightsAttested?: boolean;
   rightsAttestationVersion?: string;
-  contentType?: 'post' | 'story';
-  audience?: 'public' | 'favorites';
-  expiresAtMillis?: number;
-  repliesAllowed?: boolean;
-  mentions?: string[];
-  storySticker?: string;
-  storyMusic?: { title?: string; artist?: string };
-  storyPoll?: { question?: string; options?: string[] };
   latitude?: number;
   longitude?: number;
   targetLatitude?: number;
@@ -188,10 +173,6 @@ type ClayMessage = {
   mimeType?: string;
   durationMillis?: number;
   ownerId?: string;
-  storyId?: string;
-  reaction?: string;
-  optionIndex?: number;
-  highlighted?: boolean;
   text?: string;
   callerName?: string;
   callId?: string;
@@ -660,16 +641,6 @@ export function PostLoginHomeWebScreen({
     }
   }, [dispatchToClay]);
 
-  const sendStoriesToWeb = useCallback(async () => {
-    if (!auth.currentUser?.uid) return;
-    try {
-      dispatchToClay('poplur-native-stories', { stories: await fetchStories() });
-    } catch (error) {
-      console.warn('[PostLoginHomeWebScreen] stories bridge failed', error);
-      dispatchToClay('poplur-native-stories', { stories: [] });
-    }
-  }, [dispatchToClay]);
-
   const sendNearbyTracksToWeb = useCallback(async (message: ClayMessage) => {
     const requestId = typeof message.requestId === 'string' ? message.requestId : '';
     const latitude = typeof message.latitude === 'number' ? message.latitude : Number.NaN;
@@ -915,14 +886,6 @@ export function PostLoginHomeWebScreen({
         filterId: message.filterId,
         usedAI: message.usedAI,
         radiusMeters: Number.isFinite(message.radiusKm) ? Math.round(Number(message.radiusKm) * 1000) : undefined,
-        contentType: message.contentType === 'story' ? 'story' : 'post',
-        audience: message.audience === 'favorites' ? 'favorites' : 'public',
-        expiresAtMillis: message.expiresAtMillis,
-        repliesAllowed: message.repliesAllowed,
-        mentions: message.mentions,
-        storySticker: message.storySticker,
-        storyMusic: message.storyMusic,
-        storyPoll: message.storyPoll,
         rightsAttestationVersion: message.rightsAttestationVersion,
       });
       dispatchToClay('poplur-upload-result', { requestId, ok: true });
@@ -1051,26 +1014,6 @@ export function PostLoginHomeWebScreen({
       if (message.type === 'accountPrivacyChanged') void changeAccountPrivacy(message);
       if (message.type === 'requestProfilePosts') void sendProfilePostsToWeb();
       if (message.type === 'requestFeedPosts') void sendFeedPostsToWeb();
-      if (message.type === 'requestStories') void sendStoriesToWeb();
-      if (message.type === 'reactStory') {
-        void reactToStory(message.storyId, message.reaction)
-          .then(sendStoriesToWeb)
-          .catch(error => console.warn('[PostLoginHomeWebScreen] Story reaction failed', error));
-      }
-      if (message.type === 'voteStory') {
-        void voteOnStory(message.storyId, message.optionIndex)
-          .then(sendStoriesToWeb)
-          .catch(error => console.warn('[PostLoginHomeWebScreen] Story vote failed', error));
-      }
-      if (message.type === 'replyStory') {
-        void replyToStory(message.storyId, message.ownerId, message.text)
-          .catch(error => console.warn('[PostLoginHomeWebScreen] Story reply failed', error));
-      }
-      if (message.type === 'setStoryHighlighted') {
-        void setStoryHighlighted(message.storyId, message.highlighted)
-          .then(sendStoriesToWeb)
-          .catch(error => console.warn('[PostLoginHomeWebScreen] Story highlight failed', error));
-      }
       if (message.type === 'requestDMThreads') watchDMThreads();
       if (message.type === 'openDMThread' && message.threadId) watchDMThread(message.threadId);
       if (message.type === 'closeDMThread') stopWatchingDMThread();
