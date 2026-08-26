@@ -603,10 +603,14 @@ export function PostLoginHomeWebScreen({
         };
         const timestamp = data.createdAt as { toMillis?: () => number } | undefined;
         const createdAtMillis = numberValue(data.createdAtMillis) ?? timestamp?.toMillis?.() ?? 0;
+        const lowerMediaURL = mediaURL.toLowerCase();
+        const inferredMediaType = /\.(mp4|mov|m4v|webm)(?:[?#]|$)/i.test(lowerMediaURL) ? 'video' : 'photo';
         const row: Record<string, unknown> = {
           id: document.id,
           mediaURL,
-          mediaType: data.mediaType === 'photo' ? 'photo' : 'video',
+          mediaType: data.mediaType === 'photo' || data.mediaType === 'image'
+            ? 'photo'
+            : data.mediaType === 'video' ? 'video' : inferredMediaType,
           username: textValue(data.username, 40) ?? 'Poplur user',
           channelId: textValue(data.channelId, 40) ?? 'live',
           createdAtMillis,
