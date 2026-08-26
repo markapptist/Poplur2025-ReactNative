@@ -23,6 +23,14 @@ import {
   setStoryHighlighted,
   voteOnStory,
 } from '../services/stories';
+import {
+  closeDMThread,
+  hideDMThread,
+  observeDMThread,
+  observeDMThreads,
+  sendDM,
+  setDMTyping,
+} from '../services/directMessages';
 import { auth, db, functions } from '../services/firebase';
 import {
   getHandledPermissionPrimers,
@@ -58,7 +66,7 @@ import { NativeWebCallSignalling } from '../services/webCallSignalling';
 // homeReady).
 
 // Bump when the staged claymap.zip changes so devices re-extract.
-const BUNDLE_VERSION = '94';
+const BUNDLE_VERSION = '95';
 
 const CLAYMAP_ZIP = require('../assets/claymap/claymap.zip');
 const WEB_HOME_ORIGIN = 'http://127.0.0.1:5173';
@@ -145,7 +153,7 @@ type ClayMessage = {
   type?: string;
   requestId?: string;
   postId?: string;
-  kind?: 'photo' | 'video';
+  kind?: 'photo' | 'video' | 'image' | 'audio';
   data?: string;
   caption?: string;
   channelId?: string;
@@ -173,6 +181,12 @@ type ClayMessage = {
   sequence?: number;
   control?: string;
   otherId?: string;
+  threadId?: string;
+  clientMessageId?: string;
+  typing?: boolean;
+  source?: string;
+  mimeType?: string;
+  durationMillis?: number;
   ownerId?: string;
   storyId?: string;
   reaction?: string;
@@ -289,6 +303,9 @@ export function PostLoginHomeWebScreen({
   const captureSessionPrefixRef = useRef(`temporary:home-capture:${Date.now()}-${Math.random().toString(36).slice(2)}:`);
   const captureCacheKeysRef = useRef(new Map<string, CaptureCacheRecord>());
   const callSignallingRef = useRef<NativeWebCallSignalling | null>(null);
+  const dmThreadsStopRef = useRef<(() => void) | null>(null);
+  const dmThreadStopRef = useRef<(() => void) | null>(null);
+  const dmOpenThreadIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -330,6 +347,12 @@ export function PostLoginHomeWebScreen({
 
   useEffect(() => () => {
     cameraLiveVisibleRef.current = false;
+    dmThreadsStopRef.current?.();
+    dmThreadsStopRef.current = null;
+    dmThreadStopRef.current?.();
+    dmThreadStopRef.current = null;
+    void closeDMThread(dmOpenThreadIdRef.current ?? undefined);
+    dmOpenThreadIdRef.current = null;
     captureCacheKeysRef.current.forEach(record => record.release());
     poplurAssetCache.purgeMatching(
       key => key.startsWith(captureSessionPrefixRef.current),
@@ -967,6 +990,48 @@ export function PostLoginHomeWebScreen({
     postToWeb(result);
   }, [postToWeb]);
 
+  const watchDMThreads = useCallback(() => {
+    dmThreadsStopRef.current?.();
+    try {
+      dmThreadsStopRef.current = observeDMThreads(
+        threads => postToWeb({ type: 'poplurDMThreads', threads }),
+        error => console.warn('[PostLoginHomeWebScreen] DM thread list failed', error),
+      );
+    } catch (error) {
+      console.warn('[PostLoginHomeWebScreen] DM thread list unavailable', error);
+      postToWeb({ type: 'poplurDMThreads', threads: [] });
+    }
+  }, [postToWeb]);
+
+  const watchDMThread = useCallback((threadId: string) => {
+    if (!threadId || threadId.length > 200) return;
+    const previousThreadId = dmOpenThreadIdRef.current;
+    dmThreadStopRef.current?.();
+    dmThreadStopRef.current = null;
+    if (previousThreadId && previousThreadId !== threadId) void closeDMThread(previousThreadId);
+    try {
+      dmOpenThreadIdRef.current = threadId;
+      dmThreadStopRef.current = observeDMThread(
+        threadId,
+        messages => postToWeb({ type: 'poplurDMMessages', threadId, messages }),
+        state => postToWeb({ type: 'poplurDMThreadState', ...state }),
+        error => console.warn('[PostLoginHomeWebScreen] DM conversation failed', error),
+      );
+    } catch (error) {
+      dmOpenThreadIdRef.current = null;
+      console.warn('[PostLoginHomeWebScreen] DM conversation unavailable', error);
+      postToWeb({ type: 'poplurDMMessages', threadId, messages: [] });
+    }
+  }, [postToWeb]);
+
+  const stopWatchingDMThread = useCallback(() => {
+    const threadId = dmOpenThreadIdRef.current;
+    dmThreadStopRef.current?.();
+    dmThreadStopRef.current = null;
+    dmOpenThreadIdRef.current = null;
+    void closeDMThread(threadId ?? undefined);
+  }, []);
+
   const persistBackgroundAudioScope = useCallback((scope: BackgroundAudioScope) => {
     const preference = normalizeBackgroundAudioPreference(scope !== 'screen', scope);
     setBackgroundAudioPreference(preference);
@@ -1005,6 +1070,41 @@ export function PostLoginHomeWebScreen({
         void setStoryHighlighted(message.storyId, message.highlighted)
           .then(sendStoriesToWeb)
           .catch(error => console.warn('[PostLoginHomeWebScreen] Story highlight failed', error));
+      }
+      if (message.type === 'requestDMThreads') watchDMThreads();
+      if (message.type === 'openDMThread' && message.threadId) watchDMThread(message.threadId);
+      if (message.type === 'closeDMThread') stopWatchingDMThread();
+      if (message.type === 'setDMTyping' && message.threadId) {
+        void setDMTyping(message.threadId, message.typing === true)
+          .catch(error => console.warn('[PostLoginHomeWebScreen] DM typing failed', error));
+      }
+      if (message.type === 'deleteDMThread' && message.threadId) {
+        const threadId = message.threadId;
+        void hideDMThread(threadId)
+          .then(() => postToWeb({ type: 'poplurDMThreadHidden', threadId, ok: true }))
+          .catch(error => {
+            console.warn('[PostLoginHomeWebScreen] DM hide failed', error);
+            postToWeb({ type: 'poplurDMThreadHidden', threadId, ok: false });
+          });
+      }
+      if (message.type === 'sendDM') {
+        const clientMessageId = message.clientMessageId ?? '';
+        const text = message.text ?? '';
+        void sendDM(message.otherId, text, clientMessageId)
+          .then(() => postToWeb({ type: 'poplurDMSent', clientMessageId }))
+          .catch(error => {
+            console.warn('[PostLoginHomeWebScreen] DM send failed', error);
+            postToWeb({ type: 'poplurDMSendFailed', clientMessageId, text });
+          });
+      }
+      if (message.type === 'sendDMAttachment') {
+        // Text/history parity is live. Keep unsupported media explicit so the
+        // optimistic bubble becomes retryable instead of waiting forever.
+        postToWeb({
+          type: 'poplurDMSendFailed',
+          clientMessageId: message.clientMessageId ?? '',
+          text: 'Attachment could not be sent.',
+        });
       }
       if (message.type === 'requestNearbyTracks') void sendNearbyTracksToWeb(message);
       if (message.type === 'radioScope'
