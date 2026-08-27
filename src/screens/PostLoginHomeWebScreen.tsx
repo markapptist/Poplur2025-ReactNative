@@ -48,6 +48,10 @@ import {
   PHONE_THEME_IDS,
   PHONE_THEME_PREFERENCE_KEY,
 } from '../services/phoneThemePreference';
+import {
+  WEB_HOME_IFRAME_ALLOW,
+  WEB_HOME_PREVIEW_QUERY,
+} from '../services/webHomeEmbed';
 import claymapBundle from '../assets/claymap/bundle.json';
 
 // Post-login HOME web embed (RN parity with iOS/Android Phase 3).
@@ -1180,7 +1184,7 @@ export function PostLoginHomeWebScreen({
   // Mapbox map inside that home. Advertise that extra compositor layer so the
   // map keeps its 3D look while using the same constrained GPU budget as the
   // native shells. Native devices already select their own performance tier.
-  const webMapQuery = Platform.OS === 'web' ? '&mapLite=1' : '';
+  const webMapQuery = Platform.OS === 'web' ? WEB_HOME_PREVIEW_QUERY : '';
   const backgroundAudioBootstrapScript = backgroundAudioBootstrap(
     backgroundAudioPreference ?? { enabled: false, scope: 'screen' },
   );
@@ -1200,7 +1204,7 @@ export function PostLoginHomeWebScreen({
           ref={iframeRef}
           src={homeUri}
           title="Poplur post-login"
-          allow="geolocation; camera; microphone"
+          allow={WEB_HOME_IFRAME_ALLOW}
           onLoad={() => {
             pushPerformancePolicy();
             markHomeReady();
