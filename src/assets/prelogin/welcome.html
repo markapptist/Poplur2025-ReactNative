@@ -232,9 +232,9 @@
      paragraphs and a button — and at the risen size the Next button fell off
      the bottom of the screen. Here the cube shrinks further and rises further,
      and the stack comes up to meet it. It inherits .cubeStage's transition, so
-     stepping onto the pane interpolates rather than jumping.
-     flex-start rather than centred: the stack scrolls, and a centred overflow
-     clips at BOTH ends, which is what was eating the button. */
+     stepping onto the pane interpolates rather than jumping. The pane stays a
+     compact static composition: pre-login never turns a step into a scroll
+     view. */
   /* The explainer is the one pane where the logo and the cube compete: the
      cube rises to 20.5% and the logo sits at 58-92px, so they occupy the same
      band and whichever paints second cuts into the other. The cube is the
@@ -246,12 +246,8 @@
      gap between it and the account image below. */
   .phone.introPane .cubeStage.risen { top: 13%; transform: translate(-50%, -50%) scale(0.4); }
   .phone.introPane #paneAccountIntro .formStack { top: 20%; justify-content: flex-start; }
-  /* The button is the end of the page, so it sits at the end of the page.
-     `margin-top: auto` claims only space that is genuinely free: on a short
-     screen the stack overflows and the button flows normally right after the
-     copy, which is the case `flex-start` above exists for. Measured before
-     this: the Next button ended 147px above the bottom of an 852px screen,
-     with nothing under it — it read as floating mid-page. */
+  /* The button stays at the end of the fixed composition rather than relying
+     on a scrollable overflow region to reveal it. */
   .phone.introPane #introNext { margin-top: clamp(12px, 2.5cqh, 24px); margin-bottom: clamp(4px, 1.6cqh, 16px); }
   /* The account art belongs to the copy, not to the cube. It used to collide
      with it — see the inline-top note in computeLayout — so give it a little
@@ -572,26 +568,19 @@
     position: absolute; left: 0; right: 0; top: var(--form-top, 45%);
     bottom: max(2.5%, calc(env(safe-area-inset-bottom, 0px) + 20px + var(--poplur-keyboard-inset, 0px))); z-index: 20;
     display: flex; flex-direction: column; align-items: center; justify-content: center; gap: clamp(8px, 1.8cqh, 14px);
-    /* Every form can be taller than a compact phone once text size, the
-       keyboard-safe viewport, or a multi-field step is involved. Keep the
-       scroll area inside the visible pane and reserve room for the full clay
-       button shadow; without the bottom gutter the last action looked cut off
-       even though the element itself was technically scrollable. */
+    /* Every onboarding step is a single fixed phone-sized composition. The
+       controls compact with the pane instead of becoming a nested scroll view,
+       so the last CTA is never hidden below a fold. */
     padding:
       max(10px, env(safe-area-inset-top, 0px))
       7%
       max(28px, calc(env(safe-area-inset-bottom, 0px) + 20px + var(--poplur-keyboard-inset, 0px)));
-    overflow-x: hidden; overflow-y: auto; -webkit-overflow-scrolling: touch;
-    overscroll-behavior-y: contain;
-    scroll-padding-block:
-      max(10px, env(safe-area-inset-top, 0px))
-      max(28px, calc(env(safe-area-inset-bottom, 0px) + 20px + var(--poplur-keyboard-inset, 0px)));
+    overflow: hidden;
   }
-  /* Denser form for the 6-field business profile so it fits without scrolling */
+  /* Denser form for the 6-field business profile so it remains one screen. */
   #paneBusinessProfile .formStack { gap: clamp(3px, 1.1cqw, 7px); }
   #paneBusinessProfile .stackField { height: clamp(36px, 10cqw, 44px); }
   #paneBusinessProfile .stackLbl { margin: 2px 0 -5px; }
-  .formStack::-webkit-scrollbar { display: none; }
   /* Inside a stack, everything flows — absolute positioning is neutralized so
      elements can never overlap regardless of screen size. */
   .formStack .field, .formStack .cap-btn, .formStack .authLink { position: static; transform: none; }
@@ -682,18 +671,25 @@
   }
   .stackAgree input { width: 18px; height: 18px; accent-color: #f4459c; }
   .stackBtn { position: static; transform: none; margin: 8px auto 4px; flex: 0 0 auto; }
-  /* On compact phones the measured hero layout can otherwise claim too much
-     of the form pane. This preserves clearance below the cube while giving
-     the stack a reliably scrollable viewport. */
+  /* Dense onboarding forms lift the cube above the content and use the space
+     below it as a fixed composition. This gives the title and final CTA their
+     own lanes on a regular phone rather than covering either one. */
+  .phone.compactFormPane .cubeStage.risen {
+    top: 31%; transform: translate(-50%, -50%) scale(0.58);
+  }
+  .phone.compactFormPane .formStack {
+    top: 38%; justify-content: center; gap: clamp(5px, 1.2cqh, 9px);
+    transform: scale(var(--poplur-form-scale, 1)); transform-origin: center bottom;
+  }
+  .phone.compactFormPane .stackControl { gap: 2px; }
+  .phone.compactFormPane .stackField { height: clamp(38px, 11cqw, 46px); }
+  .phone.compactFormPane .stackBtn { margin: 2px auto 0; }
   @media (max-height: 760px) {
-    /* A centred overflowing stack starts above its own viewport, which put
-       the first label and title behind the cube. Compact forms always flow
-       from the safe top edge; later controls remain reachable by scrolling. */
-    .formStack { top: min(var(--form-top, 45%), 44cqh); justify-content: flex-start; }
-    #paneCreateLogin .formStack { gap: clamp(6px, 1.4cqh, 10px); }
-    #paneCreateLogin .stackControl { gap: 2px; }
-    #paneCreateLogin .stackField { height: clamp(40px, 11cqw, 46px); }
-    #paneCreateLogin .stackBtn { margin: 4px auto 0; }
+    .phone.compactFormPane .cubeStage.risen { top: 27%; transform: translate(-50%, -50%) scale(0.5); }
+    .phone.compactFormPane .formStack { top: 33%; gap: clamp(3px, 0.9cqh, 7px); }
+    .phone.compactFormPane .stackField { height: clamp(36px, 10cqw, 42px); }
+    .phone.compactFormPane .genderCard { height: 64px; }
+    .phone.compactFormPane .genderCard .account-3d-icon { flex-basis: 46px; width: 46px; height: 46px; }
   }
   /* Review rows */
   .reviewRow {
@@ -1095,10 +1091,9 @@
   fit(); setTimeout(fit, 60); setTimeout(fit, 400)
 
   // Keyboard-safe form focus. `interactive-widget=overlays-content` keeps the
-  // hero from jumping when iOS shows its keyboard, but it means the keyboard
-  // covers the lower part of a fixed page. Track visualViewport instead and
-  // turn that covered space into an inset on the active form stack; then place
-  // the focused editor in the upper third of the remaining scroll area.
+  // hero from jumping when iOS shows its keyboard. Pre-login remains a fixed
+  // composition, so scale a dense form into the remaining viewport instead of
+  // introducing a nested scroll area.
   const updateKeyboardSafeForm = () => {
     const active = document.activeElement
     const editing = keyboardEditorIsFocused()
@@ -1107,15 +1102,9 @@
       ? Math.max(0, stableViewportHeight - visual.height - visual.offsetTop)
       : 0
     document.documentElement.style.setProperty('--poplur-keyboard-inset', keyboardInset + 'px')
-    if (!editing || !(active instanceof HTMLElement)) return
-    const stack = active.closest('.formStack')
-    if (!stack) return
-    requestAnimationFrame(function () {
-      const fieldBox = active.getBoundingClientRect()
-      const stackBox = stack.getBoundingClientRect()
-      const target = stack.scrollTop + fieldBox.top - stackBox.top - stack.clientHeight * 0.30
-      stack.scrollTo({ top: Math.max(0, target), behavior: 'smooth' })
-    })
+    const usableHeight = Math.max(1, stableViewportHeight - keyboardInset)
+    const scale = Math.max(0.72, Math.min(1, usableHeight / stableViewportHeight))
+    document.documentElement.style.setProperty('--poplur-form-scale', String(scale))
   }
   addEventListener('focusin', function () {
     updateKeyboardSafeForm()
@@ -1831,6 +1820,10 @@
       // drives both halves of that — a smaller, higher cube and a stack that
       // comes up with it — so the two move as one.
       document.querySelector('.phone')?.classList.toggle('introPane', index === 8)
+      // Long-form sign-up steps reserve a dedicated lane below a smaller,
+      // higher cube. This keeps every control on-screen without a scroll view.
+      document.querySelector('.phone')?.classList.toggle('compactFormPane',
+        index === 3 || index === 4 || index === 5 || index === 6 || index === 7 || index === 9)
       clearInterval(window.__introKeepAwake)
       if (index === 8 && window.__poplurAmbient) {
         window.__poplurAmbient.wake()

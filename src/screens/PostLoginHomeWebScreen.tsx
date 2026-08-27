@@ -48,6 +48,7 @@ import {
   PHONE_THEME_IDS,
   PHONE_THEME_PREFERENCE_KEY,
 } from '../services/phoneThemePreference';
+import claymapBundle from '../assets/claymap/bundle.json';
 
 // Post-login HOME web embed (RN parity with iOS/Android Phase 3).
 //
@@ -65,8 +66,12 @@ import {
 // detects a native shell, hides the browser-only test pills, and emits
 // homeReady).
 
-// Bump when the staged claymap.zip changes so devices re-extract.
-const BUNDLE_VERSION = '97';
+// The ZIP's content hash, not only its human release number, keys the on-device
+// extraction. Multiple verified bundles may legitimately share a release
+// number; retaining only `claymap-v97` in that case made an upgraded app reuse
+// an older archive whose side-control PNGs were absent.
+const BUNDLE_VERSION = claymapBundle.bundleVersion;
+const BUNDLE_CACHE_KEY = `${BUNDLE_VERSION}-${claymapBundle.sha256.slice(0, 12)}`;
 
 const CLAYMAP_ZIP = require('../assets/claymap/claymap.zip');
 const WEB_HOME_ORIGIN = 'http://127.0.0.1:5173';
@@ -119,7 +124,7 @@ function backgroundAudioBootstrap(preference: BackgroundAudioPreference): string
 async function prepareBundle(): Promise<string> {
   const documentRoot = FileSystem.documentDirectory;
   if (!documentRoot) throw new Error('Poplur storage is unavailable.');
-  const activeDirectoryName = `claymap-v${BUNDLE_VERSION}`;
+  const activeDirectoryName = `claymap-v${BUNDLE_CACHE_KEY}`;
   const root = `${documentRoot}${activeDirectoryName}`;
   const marker = `${root}/.extracted`;
 
@@ -128,7 +133,7 @@ async function prepareBundle(): Promise<string> {
   // sandbox before admitting another copy.
   const entries = await FileSystem.readDirectoryAsync(documentRoot).catch(() => [] as string[]);
   const staleDirectories = entries.filter(
-    name => /^claymap-v\d+$/.test(name) && name !== activeDirectoryName,
+    name => /^claymap-v\d+(?:-[a-f0-9]+)?$/.test(name) && name !== activeDirectoryName,
   );
   for (const name of staleDirectories) {
     await FileSystem.deleteAsync(`${documentRoot}${name}`, { idempotent: true });
@@ -1184,7 +1189,7 @@ export function PostLoginHomeWebScreen({
     // Include the archive version in the page URL too. Native WebViews cache
     // index.html aggressively; this prevents a fresh extracted bundle from
     // reopening a stale home page from their HTTP cache.
-    ? `${origin}/index.html?view=home&tabs=0&bundle=${BUNDLE_VERSION}${profileQuery}${permissionQuery}${webMapQuery}`
+    ? `${origin}/index.html?view=home&tabs=0&bundle=${BUNDLE_CACHE_KEY}${profileQuery}${permissionQuery}${webMapQuery}`
     : null;
 
   return (
