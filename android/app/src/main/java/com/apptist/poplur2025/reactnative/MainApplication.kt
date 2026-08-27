@@ -2,6 +2,7 @@ package com.apptist.poplur2025.reactnative
 
 import android.app.Application
 import android.content.res.Configuration
+import android.os.Build
 
 import com.facebook.react.PackageList
 import com.facebook.react.ReactApplication
@@ -18,7 +19,7 @@ import expo.modules.ReactNativeHostWrapper
 
 class MainApplication : Application(), ReactApplication {
 
-  override val reactNativeHost: ReactNativeHost = ReactNativeHostWrapper(
+  override val reactNativeHost: ReactNativeHost by lazy { ReactNativeHostWrapper(
         this,
         object : DefaultReactNativeHost(this) {
           override fun getPackages(): List<ReactPackage> {
@@ -36,13 +37,17 @@ class MainApplication : Application(), ReactApplication {
           override val isNewArchEnabled: Boolean = BuildConfig.IS_NEW_ARCHITECTURE_ENABLED
           override val isHermesEnabled: Boolean = BuildConfig.IS_HERMES_ENABLED
       }
-  )
+  ) }
 
   override val reactHost: ReactHost
     get() = ReactNativeHostWrapper.createReactHost(applicationContext, reactNativeHost)
 
   override fun onCreate() {
     super.onCreate()
+    // The API 28+ external browser has its own WebView profile/process and no
+    // React or Expo UI. Avoid retaining RN, thermal receivers, SoLoader, and
+    // Expo lifecycle machinery after its short-lived Activity closes.
+    if (isExternalBrowserProcess()) return
     PoplurPerformanceManager.initialize(this)
     SoLoader.init(this, OpenSourceMergedSoMapping)
     if (BuildConfig.IS_NEW_ARCHITECTURE_ENABLED) {
@@ -54,6 +59,12 @@ class MainApplication : Application(), ReactApplication {
 
   override fun onConfigurationChanged(newConfig: Configuration) {
     super.onConfigurationChanged(newConfig)
+    if (isExternalBrowserProcess()) return
     ApplicationLifecycleDispatcher.onConfigurationChanged(this, newConfig)
+  }
+
+  private fun isExternalBrowserProcess(): Boolean {
+    return Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
+      && Application.getProcessName().endsWith(":poplur_external_browser")
   }
 }

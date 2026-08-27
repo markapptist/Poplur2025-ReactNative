@@ -6,7 +6,6 @@ import * as FileSystem from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
 import { DeviceMotion } from 'expo-sensors';
-import * as WebBrowser from 'expo-web-browser';
 import { StatusBar } from 'expo-status-bar';
 import Server from '@dr.pogodin/react-native-static-server';
 import { unzip } from 'react-native-zip-archive';
@@ -41,6 +40,14 @@ import {
 import { initializeFeedGoogleAds, presentFeedGoogleAd } from '../services/feedAds';
 import { handleStoreCheckoutRequested } from '../services/storeCheckout';
 import { NativeWebCallSignalling } from '../services/webCallSignalling';
+import { PoplurInAppBrowser } from '../components/PoplurInAppBrowser';
+import { normalizePoplurBrowserUrl } from '../services/inAppBrowser';
+import {
+  normalizePhoneThemeId,
+  phoneThemeBootstrap,
+  PHONE_THEME_IDS,
+  PHONE_THEME_PREFERENCE_KEY,
+} from '../services/phoneThemePreference';
 
 // Post-login HOME web embed (RN parity with iOS/Android Phase 3).
 //
@@ -185,6 +192,7 @@ type ClayMessage = {
   granted?: boolean;
   url?: string;
   visible?: boolean;
+  themeId?: string;
 };
 
 function validatedHttpsUrl(value: unknown): string | null {
@@ -261,6 +269,8 @@ export function PostLoginHomeWebScreen({
   const [profileReady, setProfileReady] = useState(false);
   const [backgroundAudioPreference, setBackgroundAudioPreference] = useState<BackgroundAudioPreference | null>(null);
   const [permissionNeeds, setPermissionNeeds] = useState<PermissionNeeds | null>(null);
+  const [inAppBrowserUrl, setInAppBrowserUrl] = useState<string | null>(null);
+  const [phoneThemeId, setPhoneThemeId] = useState<string | null>(null);
   const photoPrimerConsumedRef = useRef(false);
   const homeReadyRef = useRef(false);
   const inAppBrowserOpenRef = useRef(false);
@@ -277,8 +287,8 @@ export function PostLoginHomeWebScreen({
     || !performance.documentVisible;
   const runtimeSnapshot = {
     ...performance,
-    appState: ownsHeavyRenderer ? 'active' as const : 'background' as const,
-    documentVisible: ownsHeavyRenderer,
+    appState: ownsHeavyRenderer && !inAppBrowserUrl ? 'active' as const : 'background' as const,
+    documentVisible: ownsHeavyRenderer && !inAppBrowserUrl,
   };
   const injectedShellRef = useRef(`${RN_NATIVE_SHELL}\n${createWebPerformanceBootstrap(runtimeSnapshot)}`);
   const captureSessionPrefixRef = useRef(`temporary:home-capture:${Date.now()}-${Math.random().toString(36).slice(2)}:`);
@@ -304,6 +314,18 @@ export function PostLoginHomeWebScreen({
     return () => { active = false; };
   }, []);
 
+  useEffect(() => {
+    let active = true;
+    void AsyncStorage.getItem(PHONE_THEME_PREFERENCE_KEY)
+      .then(value => {
+        if (active) setPhoneThemeId(normalizePhoneThemeId(value) ?? PHONE_THEME_IDS[0]);
+      })
+      .catch(() => {
+        if (active) setPhoneThemeId(PHONE_THEME_IDS[0]);
+      });
+    return () => { active = false; };
+  }, []);
+
   const pushPerformancePolicy = useCallback(() => {
     webViewRef.current?.injectJavaScript(createWebPerformanceUpdate(runtimeSnapshot));
     const frame = iframeRef.current?.contentWindow;
@@ -315,7 +337,7 @@ export function PostLoginHomeWebScreen({
       }, '*');
     }
     if (!ownsHeavyRenderer) cameraLiveVisibleRef.current = false;
-  }, [ownsHeavyRenderer, performance.mode, performance.targetFPS]);
+  }, [inAppBrowserUrl, ownsHeavyRenderer, performance.mode, performance.targetFPS]);
 
   useEffect(() => {
     pushPerformancePolicy();
@@ -515,6 +537,7 @@ export function PostLoginHomeWebScreen({
     if (Platform.OS === 'web'
       || !homeReady
       || !ownsHeavyRenderer
+      || inAppBrowserUrl !== null
       || performance.appState !== 'active'
       || !performance.documentVisible) return;
 
@@ -552,6 +575,7 @@ export function PostLoginHomeWebScreen({
   }, [
     dispatchToClay,
     homeReady,
+    inAppBrowserUrl,
     ownsHeavyRenderer,
     performance.appState,
     performance.documentVisible,
@@ -908,8 +932,8 @@ export function PostLoginHomeWebScreen({
     }
   }, [dispatchToClay]);
 
-  const openInAppBrowser = useCallback(async (value: unknown) => {
-    const url = validatedHttpsUrl(value);
+  const openInAppBrowser = useCallback((value: unknown) => {
+    const url = normalizePoplurBrowserUrl(value);
     if (!url) {
       console.warn('[PostLoginHomeWebScreen] blocked invalid in-app browser URL');
       return;
@@ -917,16 +941,12 @@ export function PostLoginHomeWebScreen({
     if (inAppBrowserOpenRef.current) return;
 
     inAppBrowserOpenRef.current = true;
-    try {
-      // Expo WebBrowser uses SFSafariViewController on iOS and a Custom Tab on
-      // Android, keeping untrusted shopping pages outside the privileged clay
-      // WebView while still presenting them inside Poplur.
-      await WebBrowser.openBrowserAsync(url);
-    } catch (error) {
-      console.warn('[PostLoginHomeWebScreen] in-app browser failed', error);
-    } finally {
-      inAppBrowserOpenRef.current = false;
-    }
+    setInAppBrowserUrl(url);
+  }, []);
+
+  const closeInAppBrowser = useCallback(() => {
+    setInAppBrowserUrl(null);
+    inAppBrowserOpenRef.current = false;
   }, []);
 
   // Delivers a native result back the SAME way iOS/Android do: a raw
@@ -1073,7 +1093,15 @@ export function PostLoginHomeWebScreen({
         || message.type === 'callWatchIncoming') {
         callSignallingRef.current?.handle(message);
       }
-      if (message.type === 'openInAppBrowser') void openInAppBrowser(message.url);
+      if (message.type === 'openInAppBrowser') openInAppBrowser(message.url);
+      if (message.type === 'phoneThemeChanged') {
+        const nextThemeId = normalizePhoneThemeId(message.themeId);
+        if (nextThemeId) {
+          setPhoneThemeId(nextThemeId);
+          void AsyncStorage.setItem(PHONE_THEME_PREFERENCE_KEY, nextThemeId)
+            .catch(error => console.warn('[PostLoginHomeWebScreen] phone theme save failed', error));
+        }
+      }
       if (message.type === 'permissionHandled'
         && (message.permission === 'location' || message.permission === 'photos')) {
         const permission = message.permission;
@@ -1151,7 +1179,8 @@ export function PostLoginHomeWebScreen({
   const backgroundAudioBootstrapScript = backgroundAudioBootstrap(
     backgroundAudioPreference ?? { enabled: false, scope: 'screen' },
   );
-  const homeUri = origin && permissionNeeds && profileReady && backgroundAudioPreference
+  const phoneThemeBootstrapScript = phoneThemeBootstrap(phoneThemeId);
+  const homeUri = origin && permissionNeeds && profileReady && backgroundAudioPreference && phoneThemeId
     // Include the archive version in the page URL too. Native WebViews cache
     // index.html aggressively; this prevents a fresh extracted bundle from
     // reopening a stale home page from their HTTP cache.
@@ -1181,7 +1210,7 @@ export function PostLoginHomeWebScreen({
           source={{ uri: homeUri }}
           originWhitelist={['*']}
           injectedJavaScriptBeforeContentLoaded={
-            `${injectedShellRef.current}\n${backgroundAudioBootstrapScript}`
+            `${injectedShellRef.current}\n${backgroundAudioBootstrapScript}\n${phoneThemeBootstrapScript}`
           }
           onMessage={handleMessage}
           onLoadEnd={pushPerformancePolicy}
@@ -1203,6 +1232,7 @@ export function PostLoginHomeWebScreen({
           <PreloginWebScreen splashOnly />
         </View>
       )}
+      <PoplurInAppBrowser url={inAppBrowserUrl} onClose={closeInAppBrowser} />
     </View>
   );
 }

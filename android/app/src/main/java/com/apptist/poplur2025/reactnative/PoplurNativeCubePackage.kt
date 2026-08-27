@@ -7,10 +7,16 @@ import com.facebook.react.uimanager.ViewManager
 
 class PoplurNativeCubePackage : ReactPackage {
   override fun createNativeModules(reactContext: ReactApplicationContext): List<NativeModule> {
-    return listOf(PoplurPerformanceModule(reactContext))
+    return listOf(
+      PoplurPerformanceModule(reactContext),
+      PoplurSafeBrowserModule(reactContext),
+    )
   }
 
   override fun createViewManagers(reactContext: ReactApplicationContext): List<ViewManager<*, *>> {
-    return listOf(PoplurNativeCubeManager(), PoplurNativeConfettiManager())
+    return listOf(
+      PoplurNativeCubeManager(),
+      PoplurNativeConfettiManager(),
+    )
   }
 }

@@ -43,5 +43,18 @@
         <data android:scheme="com.apptist.poplur2025.reactnative"/>
       </intent-filter>
     </activity>
+    <activity
+        android:name=".PoplurSafeBrowserActivity"
+        android:excludeFromRecents="true"
+        android:exported="false"
+        android:process=":poplur_external_browser"
+        android:screenOrientation="portrait"
+        android:theme="@style/AppTheme"/>
+    <activity
+        android:name=".PoplurSafeBrowserLegacyActivity"
+        android:excludeFromRecents="true"
+        android:exported="false"
+        android:screenOrientation="portrait"
+        android:theme="@style/AppTheme"/>
   </application>
 </manifest>
