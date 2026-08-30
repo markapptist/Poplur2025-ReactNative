@@ -23,6 +23,11 @@ import {
   sendDM,
   setDMTyping,
 } from '../services/directMessages';
+import {
+  dismissNotifications,
+  markNotificationsRead,
+  observeNotificationInbox,
+} from '../services/notifications';
 import { auth, db, functions } from '../services/firebase';
 import {
   getHandledPermissionPrimers,
@@ -42,6 +47,12 @@ import { handleStoreCheckoutRequested } from '../services/storeCheckout';
 import { NativeWebCallSignalling } from '../services/webCallSignalling';
 import { PoplurInAppBrowser } from '../components/PoplurInAppBrowser';
 import { normalizePoplurBrowserUrl } from '../services/inAppBrowser';
+import {
+  INACTIVE_NAVIGATOR_MOTION_DEMAND,
+  navigatorMotionSampleRateHz,
+  navigatorMotionSubscriptionIsEligible,
+  normalizeNavigatorMotionDemand,
+} from '../services/navigatorMotionDemand';
 import {
   normalizePhoneThemeId,
   phoneThemeBootstrap,
@@ -202,6 +213,10 @@ type ClayMessage = {
   url?: string;
   visible?: boolean;
   themeId?: string;
+  active?: boolean;
+  aiming?: boolean;
+  id?: string;
+  ids?: string[];
 };
 
 function validatedHttpsUrl(value: unknown): string | null {
@@ -280,6 +295,9 @@ export function PostLoginHomeWebScreen({
   const [permissionNeeds, setPermissionNeeds] = useState<PermissionNeeds | null>(null);
   const [inAppBrowserUrl, setInAppBrowserUrl] = useState<string | null>(null);
   const [phoneThemeId, setPhoneThemeId] = useState<string | null>(null);
+  const [navigatorMotionDemand, setNavigatorMotionDemand] = useState(
+    INACTIVE_NAVIGATOR_MOTION_DEMAND,
+  );
   const photoPrimerConsumedRef = useRef(false);
   const homeReadyRef = useRef(false);
   const inAppBrowserOpenRef = useRef(false);
@@ -306,6 +324,8 @@ export function PostLoginHomeWebScreen({
   const dmThreadsStopRef = useRef<(() => void) | null>(null);
   const dmThreadStopRef = useRef<(() => void) | null>(null);
   const dmOpenThreadIdRef = useRef<string | null>(null);
+  const notificationStopRef = useRef<(() => void) | null>(null);
+  const notificationIdsRef = useRef<string[]>([]);
 
   useEffect(() => {
     let active = true;
@@ -365,6 +385,9 @@ export function PostLoginHomeWebScreen({
     dmThreadStopRef.current = null;
     void closeDMThread(dmOpenThreadIdRef.current ?? undefined);
     dmOpenThreadIdRef.current = null;
+    notificationStopRef.current?.();
+    notificationStopRef.current = null;
+    notificationIdsRef.current = [];
     captureCacheKeysRef.current.forEach(record => record.release());
     poplurAssetCache.purgeMatching(
       key => key.startsWith(captureSessionPrefixRef.current),
@@ -537,25 +560,27 @@ export function PostLoginHomeWebScreen({
   }, []);
 
   useEffect(() => {
-    // iOS and Android native shells both advertise PoplurNative, so the web
-    // navigator intentionally waits for a native `poplur-native-motion`
-    // stream instead of subscribing to browser deviceorientation. RN used to
-    // provide the shell without that stream, leaving every model — including
-    // the Phone — static. Keep exactly one 30 Hz foreground subscription and
-    // let CubeTab3D perform the display-rate interpolation for all models.
-    if (Platform.OS === 'web'
-      || !homeReady
-      || !ownsHeavyRenderer
-      || inAppBrowserUrl !== null
-      || performance.appState !== 'active'
-      || !performance.documentVisible) return;
+    // The persistent web navigator owns this native sensor lease. Do not keep
+    // DeviceMotion or the JS -> WebView bridge active merely because HOME is
+    // in the foreground: the navigator reports demand only while its governed
+    // renderer has visible work. Ordinary motion consumes 20 Hz; camera aim is
+    // capped at the web renderer's 30 Hz ceiling.
+    const eligible = navigatorMotionSubscriptionIsEligible({
+      nativePlatform: Platform.OS !== 'web',
+      homeReady,
+      ownsHeavyRenderer,
+      browserOpen: inAppBrowserUrl !== null,
+      appActive: performance.appState === 'active',
+      documentVisible: performance.documentVisible,
+    }, navigatorMotionDemand);
+    if (!eligible) return;
 
     let cancelled = false;
     let subscription: { remove: () => void } | null = null;
     let lastRoll = Number.NaN;
     let lastPitch = Number.NaN;
 
-    DeviceMotion.setUpdateInterval(1000 / 30);
+    DeviceMotion.setUpdateInterval(1000 / navigatorMotionSampleRateHz(navigatorMotionDemand));
     void DeviceMotion.isAvailableAsync().then(available => {
       if (!available || cancelled) return;
       subscription = DeviceMotion.addListener(sample => {
@@ -584,6 +609,20 @@ export function PostLoginHomeWebScreen({
   }, [
     dispatchToClay,
     homeReady,
+    inAppBrowserUrl,
+    navigatorMotionDemand,
+    ownsHeavyRenderer,
+    performance.appState,
+    performance.documentVisible,
+  ]);
+
+  useEffect(() => {
+    if (ownsHeavyRenderer
+      && inAppBrowserUrl === null
+      && performance.appState === 'active'
+      && performance.documentVisible) return;
+    setNavigatorMotionDemand(INACTIVE_NAVIGATOR_MOTION_DEMAND);
+  }, [
     inAppBrowserUrl,
     ownsHeavyRenderer,
     performance.appState,
@@ -999,6 +1038,23 @@ export function PostLoginHomeWebScreen({
     }
   }, [postToWeb]);
 
+  const watchNotifications = useCallback(() => {
+    notificationStopRef.current?.();
+    notificationStopRef.current = observeNotificationInbox(
+      notifications => {
+        notificationIdsRef.current = notifications.map(item => item.id);
+        postToWeb({ type: 'poplurNotifications', notifications });
+      },
+      error => console.warn('[PostLoginHomeWebScreen] notification inbox failed', error),
+    );
+  }, [postToWeb]);
+
+  const stopWatchingNotifications = useCallback(() => {
+    notificationStopRef.current?.();
+    notificationStopRef.current = null;
+    notificationIdsRef.current = [];
+  }, []);
+
   const watchDMThread = useCallback((threadId: string) => {
     if (!threadId || threadId.length > 200) return;
     const previousThreadId = dmOpenThreadIdRef.current;
@@ -1042,11 +1098,33 @@ export function PostLoginHomeWebScreen({
     try {
       const message = JSON.parse(event.nativeEvent.data) as ClayMessage;
       if (message.type === 'homeReady' || message.type === 'mapReady') markHomeReady();
+      if (message.type === 'navigatorMotionDemandChanged') {
+        const demand = normalizeNavigatorMotionDemand(message.active, message.aiming);
+        setNavigatorMotionDemand(current => (
+          current.active === demand.active && current.aiming === demand.aiming
+            ? current
+            : demand
+        ));
+      }
       if (message.type === 'requestProfile') void sendProfileToWeb();
       if (message.type === 'requestAccountPrivacy') void sendAccountPrivacyToWeb();
       if (message.type === 'accountPrivacyChanged') void changeAccountPrivacy(message);
       if (message.type === 'requestProfilePosts') void sendProfilePostsToWeb();
       if (message.type === 'requestFeedPosts') void sendFeedPostsToWeb();
+      if (message.type === 'notificationsRequested') watchNotifications();
+      if (message.type === 'notificationsStopped') stopWatchingNotifications();
+      if (message.type === 'notificationsRead') {
+        void markNotificationsRead(message.ids ?? notificationIdsRef.current)
+          .catch(error => console.warn('[PostLoginHomeWebScreen] notification read failed', error));
+      }
+      if (message.type === 'notificationDismissed' && message.id) {
+        void dismissNotifications([message.id])
+          .catch(error => console.warn('[PostLoginHomeWebScreen] notification dismiss failed', error));
+      }
+      if (message.type === 'notificationsCleared') {
+        void dismissNotifications(message.ids ?? notificationIdsRef.current)
+          .catch(error => console.warn('[PostLoginHomeWebScreen] notification clear failed', error));
+      }
       if (message.type === 'requestDMThreads') watchDMThreads();
       if (message.type === 'openDMThread' && message.threadId) watchDMThread(message.threadId);
       if (message.type === 'closeDMThread') stopWatchingDMThread();
