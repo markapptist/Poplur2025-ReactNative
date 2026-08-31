@@ -47,6 +47,7 @@ import { handleStoreCheckoutRequested } from '../services/storeCheckout';
 import { NativeWebCallSignalling } from '../services/webCallSignalling';
 import { PoplurInAppBrowser } from '../components/PoplurInAppBrowser';
 import { normalizePoplurBrowserUrl } from '../services/inAppBrowser';
+import { nativeAuthTokenDetail } from '../services/nativeAuthTokenBridge';
 import {
   INACTIVE_NAVIGATOR_MOTION_DEMAND,
   navigatorMotionSampleRateHz,
@@ -563,6 +564,15 @@ export function PostLoginHomeWebScreen({
       `window.dispatchEvent(new CustomEvent(${name}, { detail: ${payload} })); true;`,
     );
   }, []);
+
+  const sendAuthTokenToWeb = useCallback(async () => {
+    try {
+      const detail = await nativeAuthTokenDetail(auth.currentUser);
+      if (detail) dispatchToClay('poplur-native-auth-token', detail);
+    } catch (error) {
+      console.warn('[PostLoginHomeWebScreen] auth token bridge failed', error);
+    }
+  }, [dispatchToClay]);
 
   useEffect(() => {
     // The persistent web navigator owns this native sensor lease. Do not keep
@@ -1119,6 +1129,7 @@ export function PostLoginHomeWebScreen({
         ));
       }
       if (message.type === 'requestProfile') void sendProfileToWeb();
+      if (message.type === 'requestAuthToken') void sendAuthTokenToWeb();
       if (message.type === 'requestAccountPrivacy') void sendAccountPrivacyToWeb();
       if (message.type === 'accountPrivacyChanged') void changeAccountPrivacy(message);
       if (message.type === 'requestProfilePosts') void sendProfilePostsToWeb();
