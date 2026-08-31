@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Platform, StyleSheet, View } from 'react-native';
+import { Platform, Share, StyleSheet, View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Asset } from 'expo-asset';
 import * as FileSystem from 'expo-file-system';
@@ -174,6 +174,7 @@ type ClayMessage = {
   requestId?: string;
   postId?: string;
   kind?: 'photo' | 'video' | 'image' | 'audio';
+  mediaKind?: 'photo' | 'video' | 'all';
   data?: string;
   caption?: string;
   channelId?: string;
@@ -201,6 +202,10 @@ type ClayMessage = {
   durationMillis?: number;
   ownerId?: string;
   text?: string;
+  title?: string;
+  user?: string;
+  link?: string;
+  url?: string;
   callerName?: string;
   callId?: string;
   sdpType?: string;
@@ -908,7 +913,11 @@ export function PostLoginHomeWebScreen({
     };
   }, [origin]);
 
-  const pickCapture = useCallback(async (source: 'camera' | 'library', requestedKind: 'photo' | 'video' | 'all') => {
+  const pickCapture = useCallback(async (
+    source: 'camera' | 'library',
+    requestedKind: 'photo' | 'video' | 'all',
+    delivery: 'composer' | 'cameraRoll' = 'composer',
+  ) => {
     const permission = source === 'camera'
       ? await ImagePicker.requestCameraPermissionsAsync()
       : await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -937,7 +946,10 @@ export function PostLoginHomeWebScreen({
     if (result.canceled || !result.assets[0]) return;
 
     const capture = await materializeCapture(result.assets[0]);
-    dispatchToClay('poplur-native-capture', capture);
+    dispatchToClay(
+      delivery === 'cameraRoll' ? 'poplur-native-camera-roll-selection' : 'poplur-native-capture',
+      capture,
+    );
   }, [dispatchToClay, materializeCapture]);
 
   const publishPost = useCallback(async (message: ClayMessage) => {
@@ -1160,6 +1172,23 @@ export function PostLoginHomeWebScreen({
           text: 'Attachment could not be sent.',
         });
       }
+      if (message.type === 'sharePost') {
+        const title = message.title?.trim() || 'Poplur';
+        const user = message.user?.trim();
+        const suppliedLink = validatedHttpsUrl(message.link ?? message.url);
+        const postLink = message.postId
+          ? `https://poplur.com/p/${encodeURIComponent(message.postId)}`
+          : null;
+        // A post id is the canonical identity. Never let a caller-supplied
+        // channel/generic URL collapse distinct posts onto one share link.
+        // Link-only surfaces such as Radio continue to use suppliedLink.
+        const link = postLink ?? suppliedLink;
+        const line = user ? `${title} — ${user}` : title;
+        void Share.share({
+          title: 'Poplur',
+          message: link ? `${line}\n${link}` : line,
+        }).catch(error => console.warn('[PostLoginHomeWebScreen] share failed', error));
+      }
       if (message.type === 'requestNearbyTracks') void sendNearbyTracksToWeb(message);
       if (message.type === 'radioScope'
         && (message.scope === 'screen' || message.scope === 'app' || message.scope === 'outside')) {
@@ -1247,6 +1276,15 @@ export function PostLoginHomeWebScreen({
           void rememberPhotos;
           void pickCapture('library', 'all').catch(error => console.warn('[PostLoginHomeWebScreen] camera roll failed', error));
         }
+      }
+      if (message.type === 'requestProfileCameraRoll') {
+        void markPermissionPrimerHandled('photos').catch(error =>
+          console.warn('[PostLoginHomeWebScreen] profile photo permission state save failed', error));
+        const requestedKind = message.mediaKind === 'photo' || message.mediaKind === 'video'
+          ? message.mediaKind
+          : 'all';
+        void pickCapture('library', requestedKind, 'cameraRoll').catch(error =>
+          console.warn('[PostLoginHomeWebScreen] profile camera roll failed', error));
       }
       if (message.type === 'publishPost') void publishPost(message);
       if (message.type === 'poplurStoreCheckoutRequested') void runStoreCheckout(message);
