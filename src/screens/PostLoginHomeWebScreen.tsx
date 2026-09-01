@@ -402,28 +402,40 @@ export function PostLoginHomeWebScreen({
     captureCacheKeysRef.current.clear();
   }, []);
 
+  const dispatchProfileToWeb = (detail: Record<string, string | boolean>) => {
+    const payload = JSON.stringify(detail)
+      .replace(/</g, '\\u003c')
+      .replace(/>/g, '\\u003e')
+      .replace(/&/g, '\\u0026');
+    // ProfileTwin owns the shipping profile UI and listens to this event.
+    // Calling only the legacy global updated neither its React state nor the
+    // avatar after a pull-to-refresh.
+    webViewRef.current?.injectJavaScript(
+      `window.poplurProfile?.(${payload});` +
+        `window.dispatchEvent(new CustomEvent('poplur-native-profile',{detail:${payload}}));true;`,
+    );
+  };
+
   const sendProfileToWeb = async () => {
+    // Identity is the join key for Map, Feed and Profile. Capture it before
+    // the optional profile-document read so a transient Firestore failure can
+    // never turn an authenticated account into an ownerless Profile grid.
+    const uid = auth.currentUser?.uid?.trim();
     try {
       const profile = await getCurrentProfile();
       const username = profile?.username?.trim();
       const photo = validatedHttpsUrl(profile?.photoURL);
-      const payload = JSON.stringify({
+      dispatchProfileToWeb({
+        ...(uid ? { uid } : {}),
         ...(username ? { username } : {}),
         business: profile?.accountType === 'business',
         ...(photo ? { photo } : {}),
-      })
-        .replace(/</g, '\\u003c')
-        .replace(/>/g, '\\u003e')
-        .replace(/&/g, '\\u0026');
-      // ProfileTwin owns the shipping profile UI and listens to this event.
-      // Calling only the legacy global updated neither its React state nor the
-      // avatar after a pull-to-refresh.
-      webViewRef.current?.injectJavaScript(
-        `window.poplurProfile?.(${payload});` +
-          `window.dispatchEvent(new CustomEvent('poplur-native-profile',{detail:${payload}}));true;`,
-      );
+      });
     } catch (error) {
       console.warn('[PostLoginHomeWebScreen] profile bridge failed', error);
+      // The richer profile can retry later; the stable auth identity must not
+      // wait for it because owned posts are already available independently.
+      dispatchProfileToWeb({ ...(uid ? { uid } : {}), business: false });
     }
   };
 
@@ -702,6 +714,10 @@ export function PostLoginHomeWebScreen({
           channelId: textValue(data.channelId, 40) ?? 'live',
           createdAtMillis,
         };
+        const ownerId = textValue(data.userID, 128)
+          ?? textValue(data.userId, 128)
+          ?? textValue(data.ownerId, 128);
+        if (ownerId) row.ownerId = ownerId;
         const posterURL = validatedHttpsUrl(data.posterURL);
         if (posterURL) row.posterURL = posterURL;
         const caption = textValue(data.caption, 2_000);
