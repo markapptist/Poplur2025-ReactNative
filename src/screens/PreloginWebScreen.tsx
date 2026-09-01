@@ -5,16 +5,23 @@ import * as FileSystem from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
 import { StatusBar } from 'expo-status-bar';
-import { createUserWithEmailAndPassword } from 'firebase/auth';
+import { createUserWithEmailAndPassword, updateProfile } from 'firebase/auth';
+import { doc, setDoc } from 'firebase/firestore';
+import { getDownloadURL, ref, uploadString } from 'firebase/storage';
 import WebView, { WebViewMessageEvent } from 'react-native-webview';
 import { saveUserProfile, signInWithUsernameOrEmail } from '../services/auth';
-import { auth } from '../services/firebase';
+import { auth, db, storage } from '../services/firebase';
 import { markPermissionPrimerHandled } from '../services/permissionPrimer';
 import { usePoplurHeavyRenderer, usePoplurPerformance } from '../performance/PoplurPerformance';
 import {
   createWebPerformanceBootstrap,
   createWebPerformanceUpdate,
 } from '../performance/PoplurPerformanceManager';
+import {
+  ISOLATED_SYNTHETIC_ONBOARDING,
+  syntheticOnboardingMetadata,
+  type SyntheticOnboardingMode,
+} from '../services/syntheticOnboarding';
 
 type Page = 'splash' | 'welcome';
 type AssetModule = number;
@@ -190,10 +197,13 @@ async function preparePage(page: Page): Promise<string> {
 const FALLBACK_LAT = 43.6532;
 const FALLBACK_LON = -79.3832;
 
-export function PreloginWebScreen({ splashOnly = false, onPermissionSequenceHandled }: {
+export function PreloginWebScreen({ splashOnly = false, syntheticOnboardingMode = null, onPermissionSequenceHandled }: {
   splashOnly?: boolean;
+  syntheticOnboardingMode?: SyntheticOnboardingMode | null;
   onPermissionSequenceHandled?: () => void;
 }) {
+  const isolatedSyntheticOnboarding =
+    syntheticOnboardingMode === ISOLATED_SYNTHETIC_ONBOARDING;
   const webViewRef = useRef<WebView>(null);
   const permissionChoicesRef = useRef(new Set<'location' | 'photos'>());
   const cubeReadyRef = useRef(false);
@@ -307,9 +317,49 @@ export function PreloginWebScreen({ splashOnly = false, onPermissionSequenceHand
       }
       try {
         const credential = await createUserWithEmailAndPassword(auth, payload.email.trim(), payload.password);
-        await saveUserProfile(credential.user.uid, payload.username || payload.email.split('@')[0], payload.email, {
+        let photoURL = '';
+        if (payload.profilePhotoDataUrl) {
+          if (!/^data:image\/(?:jpeg|jpg|png|webp);base64,/i.test(payload.profilePhotoDataUrl)
+            || payload.profilePhotoDataUrl.length > 8 * 1024 * 1024) {
+            throw new Error('Choose a supported profile photo under 8 MB.');
+          }
+          const photoRef = ref(storage, `profile_pictures/${credential.user.uid}.jpg`);
+          await uploadString(photoRef, payload.profilePhotoDataUrl, 'data_url');
+          photoURL = await getDownloadURL(photoRef);
+        }
+        const cleanUsername = (payload.username || payload.email.split('@')[0])
+          .trim().replace(/^@+/, '') || 'first-user';
+        const syntheticProfileMetadata = isolatedSyntheticOnboarding
+          ? {
+            syntheticBeta: true,
+            syntheticActorId: 'sim-onboarding-first',
+            syntheticJourney: 'first-user-v1',
+          }
+          : syntheticOnboardingMetadata(syntheticOnboardingMode);
+        const profile = {
+          uid: credential.user.uid,
+          username: cleanUsername,
+          usernameNormalized: cleanUsername.toLowerCase().replace(/[^a-z0-9._-]/g, ''),
+          email: payload.email.trim().toLowerCase(),
           accountType: payload.accountType || 'personal',
-          createdAt: Date.now()
+          createdAt: Date.now(),
+          ...(photoURL ? { photoURL, profilePictureURL: photoURL } : {}),
+          ...(syntheticProfileMetadata ?? {}),
+        };
+        if (syntheticOnboardingMode) {
+          // Both recorded journeys create only their new account's self-owned
+          // profile document. The isolated emulator starts empty; the shared
+          // tester deliberately avoids the production /usernames index, whose
+          // rules deny client writes and whose email-bearing documents must not
+          // become a test setup dependency. Ordinary signup keeps its existing
+          // username reservation path below.
+          await setDoc(doc(db, 'users', credential.user.uid), profile, { merge: true });
+        } else {
+          await saveUserProfile(credential.user.uid, cleanUsername, payload.email, profile);
+        }
+        await updateProfile(credential.user, {
+          displayName: cleanUsername,
+          ...(photoURL ? { photoURL } : {}),
         });
         postAuthResult(true);
       } catch (error: any) {

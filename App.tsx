@@ -13,10 +13,41 @@ import { LoginScreen } from './src/screens/LoginScreen';
 import { SignUpScreen } from './src/screens/SignUpScreen';
 import { PreloginWebScreen } from './src/screens/PreloginWebScreen';
 import { PostLoginHomeWebScreen } from './src/screens/PostLoginHomeWebScreen';
+import {
+  ISOLATED_SYNTHETIC_ONBOARDING,
+  resolveSyntheticOnboardingMode,
+  type SyntheticOnboardingMode,
+} from './src/services/syntheticOnboarding';
 
 // Post-login web-embed (parity with iOS/Android): render the approved web home
 // rather than the divergent native RN tabs. Reversible.
 const USE_WEB_HOME = true;
+
+async function waitForSyntheticProfile(user: User, timeoutMs = 10_000): Promise<boolean> {
+  const uid = user.uid;
+  if (!uid) return false;
+  try {
+    const token = await user.getIdToken();
+    const endpoint = `http://127.0.0.1:8080/v1/projects/demo-poplur-first-user-v1/databases/(default)/documents/users/${encodeURIComponent(uid)}`;
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const response = await fetch(endpoint, { headers: { authorization: `Bearer ${token}` } });
+      if (response.ok) {
+        const document = await response.json() as {
+          fields?: Record<string, { stringValue?: string }>;
+        };
+        const ready = document.fields?.syntheticActorId?.stringValue === 'sim-onboarding-first'
+          && document.fields?.syntheticJourney?.stringValue === 'first-user-v1';
+        return ready;
+      }
+      if (response.status !== 404) return false;
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+  } catch {
+    return false;
+  }
+  return false;
+}
 import { FeedScreen } from './src/screens/FeedScreen';
 import { MapScreen } from './src/screens/MapScreen';
 import { CameraScreen } from './src/screens/CameraScreen';
@@ -80,6 +111,9 @@ export default function App() {
     __DEV__ &&
     typeof window !== 'undefined' &&
     new URLSearchParams(window.location.search).get('nologin') === '1';
+  const syntheticOnboardingMode = resolveSyntheticOnboardingMode();
+  const isolatedSyntheticOnboarding =
+    syntheticOnboardingMode === ISOLATED_SYNTHETIC_ONBOARDING;
 
   useEffect(() => {
     if (!devBypassLogin) return;
@@ -98,10 +132,27 @@ export default function App() {
       setPreloginPermissionsHandled(false);
       setUser(null);
     }, 4000);
+    let cancelled = false;
     let unsubscribe: (() => void) | undefined;
     try {
       unsubscribe = onAuthStateChanged(auth, user => {
         clearTimeout(timeout);
+        if (user && isolatedSyntheticOnboarding) {
+          // createUserWithEmailAndPassword publishes Auth immediately. Keep
+          // the visible signup mounted until its photo/profile transaction is
+          // actually complete, or unmounting can strand an Auth-only account.
+          void waitForSyntheticProfile(user).then(ready => {
+            if (cancelled) return;
+            if (!ready) {
+              setAuthError('The isolated profile did not finish creating.');
+              setUser(null);
+              return;
+            }
+            markScreenNavigation('PostLoginHomeWebScreen');
+            setUser(user);
+          });
+          return;
+        }
         markScreenNavigation(user ? 'PostLoginHomeWebScreen' : 'PreloginWebScreen');
         if (!user) setPreloginPermissionsHandled(false);
         setUser(user);
@@ -119,8 +170,8 @@ export default function App() {
       setPreloginPermissionsHandled(false);
       setUser(null);
     }
-    return () => { clearTimeout(timeout); unsubscribe?.(); };
-  }, []);
+    return () => { cancelled = true; clearTimeout(timeout); unsubscribe?.(); };
+  }, [devBypassLogin, isolatedSyntheticOnboarding]);
 
   // DEV bypass (dev builds only): ?devAuth=1 skips the Firebase auth gate and
   // lands in the *current* post-login home (the approved clay web home, same as
@@ -140,18 +191,19 @@ export default function App() {
   // Post-login parity with iOS/Android Phase 3: signed-in users get the approved
   // web home (clay-map ViewHarness ?view=home) instead of the native RN remake.
   // Flip USE_WEB_HOME to false to restore the native MainApp tabs.
-  return <SafeAreaProvider><PoplurPerformanceRuntime /><PerformanceMonitor /><NavigationContainer documentTitle={{ formatter: () => 'Poplur' }}><StatusBar style="light" />{user ? (USE_WEB_HOME ? <ProfiledScreen name="PostLoginHomeWebScreen"><PostLoginHomeWebScreen skipPermissionPrimer={preloginPermissionsHandled} /></ProfiledScreen> : <MainApp />) : <AuthStack authError={authError} onPermissionSequenceHandled={() => setPreloginPermissionsHandled(true)} />}</NavigationContainer></SafeAreaProvider>;
+  return <SafeAreaProvider><PoplurPerformanceRuntime /><PerformanceMonitor /><NavigationContainer documentTitle={{ formatter: () => 'Poplur' }}><StatusBar style="light" />{user ? (USE_WEB_HOME ? <ProfiledScreen name="PostLoginHomeWebScreen"><PostLoginHomeWebScreen skipPermissionPrimer={preloginPermissionsHandled} syntheticOnboardingMode={syntheticOnboardingMode} /></ProfiledScreen> : <MainApp />) : <AuthStack authError={authError} syntheticOnboardingMode={syntheticOnboardingMode} onPermissionSequenceHandled={() => setPreloginPermissionsHandled(true)} />}</NavigationContainer></SafeAreaProvider>;
 }
 
-function AuthStack({ authError, onPermissionSequenceHandled }: {
+function AuthStack({ authError, syntheticOnboardingMode, onPermissionSequenceHandled }: {
   authError: string | null;
+  syntheticOnboardingMode: SyntheticOnboardingMode | null;
   onPermissionSequenceHandled: () => void;
 }) {
   return <Stack.Navigator screenOptions={{ headerShown: false, contentStyle: { backgroundColor: '#050713' } }}>
     {/* iOS physical is the source baseline: render the same approved GCL web
         bundle on RN rather than maintaining a divergent native remake. */}
     <Stack.Screen name="Prelogin">
-      {() => <ProfiledScreen name="PreloginWebScreen"><PreloginWebScreen onPermissionSequenceHandled={onPermissionSequenceHandled} /></ProfiledScreen>}
+      {() => <ProfiledScreen name="PreloginWebScreen"><PreloginWebScreen syntheticOnboardingMode={syntheticOnboardingMode} onPermissionSequenceHandled={onPermissionSequenceHandled} /></ProfiledScreen>}
     </Stack.Screen>
   </Stack.Navigator>;
 }

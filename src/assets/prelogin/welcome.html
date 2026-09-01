@@ -1877,13 +1877,41 @@
     // Business profile → Verify → Review → Submit). Personal finishes after
     // Create login. Every step is a native pane matching the initial page. ──
     function isBusiness() { return document.querySelector('.acctB').classList.contains('on') }
+    var signupSubmitting = false
+    var signupPhotoDataUrl = ''
     function finishSignup(message) {
+      if (signupSubmitting) return
+      var acctType = isBusiness() ? 'business' : 'personal'
+      var emailInput = document.querySelector('#paneCreateLogin input[type="email"]')
+      var passwordInputs = document.querySelectorAll('#paneCreateLogin input[type="password"]')
+      var email = emailInput ? emailInput.value.trim() : ''
+      var password = passwordInputs && passwordInputs[0] ? passwordInputs[0].value : ''
+      var posted = window.poplurBridge && poplurBridge.signUp({
+        email: email,
+        password: password,
+        accountType: acctType,
+        profilePhotoDataUrl: signupPhotoDataUrl
+      })
+      if (posted) {
+        signupSubmitting = true
+        return
+      }
+      // Browser-only prototype fallback. Native and RN hosts have the bridge,
+      // so hosted signup never claims success before Firebase responds.
       cubeSuccess()
       if (window.__poplurShowAlert) window.__poplurShowAlert(message, 'Nice!')
       // Ask for the cube's gender before the post-login handoff, same
       // placement as the reviewed prototype: right after a successful
       // sign-in/sign-up, before the app itself opens.
       setTimeout(function () { setPane(9) }, 1400)
+    }
+    window.poplurAuthResult = function (result) {
+      signupSubmitting = false
+      if (result && result.ok) {
+        cubeSuccess()
+        return
+      }
+      signupError((result && result.error) || 'Something went wrong. Please try again.')
     }
     // Date of birth — the YEAR list is generated at runtime and spans the
     // full range rather than being trimmed to 13+-eligible years, so a
@@ -2151,6 +2179,7 @@
         var img = new Image(); img.src = reader.result
         var circle = document.getElementById('photoCircle')
         circle.textContent = ''; circle.appendChild(img)
+        signupPhotoDataUrl = typeof reader.result === 'string' ? reader.result : ''
         photoSet = true
       }
       reader.readAsDataURL(file)

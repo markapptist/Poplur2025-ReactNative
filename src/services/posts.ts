@@ -4,8 +4,83 @@ import { auth, db, storage } from './firebase';
 import type { Post } from '../types/models';
 import { poplurAssetCache } from '../performance/PoplurAssetCache';
 import { verifiedMediaSize } from './mediaResources';
+import {
+  ISOLATED_SYNTHETIC_ONBOARDING,
+  resolveSyntheticOnboardingMode,
+  syntheticOnboardingMetadata,
+} from './syntheticOnboarding';
 
 const postsCollection = collection(db, 'posts');
+
+function syntheticOnboardingContext() {
+  const mode = resolveSyntheticOnboardingMode();
+  const metadata = syntheticOnboardingMetadata(mode);
+  return mode && metadata ? { mode, metadata } : null;
+}
+
+type FirestoreRestValue = {
+  stringValue?: string;
+  doubleValue?: number;
+  integerValue?: string;
+};
+
+type FirestoreRestDocument = {
+  fields?: Record<string, FirestoreRestValue>;
+};
+
+function restString(document: FirestoreRestDocument, key: string): string {
+  return document.fields?.[key]?.stringValue ?? '';
+}
+
+function restNumber(document: FirestoreRestDocument, key: string): number {
+  const value = document.fields?.[key];
+  return Number(value?.doubleValue ?? value?.integerValue ?? Number.NaN);
+}
+
+/**
+ * Playwright's fail-closed network interception can keep Firestore's streaming
+ * WebChannel response open after the emulator has already committed the write.
+ * This exact-loopback, synthetic-only proof prevents that transport quirk from
+ * stranding the visible app while still requiring both committed documents
+ * before the UI receives success. Production never enters this route.
+ */
+async function waitForSyntheticPostCommit(uid: string, postId: string): Promise<void> {
+  const user = auth.currentUser;
+  if (!user || user.uid !== uid) throw new Error('The isolated post lost its bound account.');
+  const token = await user.getIdToken();
+  const base = 'http://127.0.0.1:8080/v1/projects/demo-poplur-first-user-v1/databases/(default)/documents';
+  const postURL = `${base}/posts/${encodeURIComponent(postId)}`;
+  const locationURL = `${base}/users/${encodeURIComponent(uid)}/postLocations/${encodeURIComponent(postId)}`;
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    const [postResponse, locationResponse] = await Promise.all([
+      fetch(postURL, { headers: { authorization: `Bearer ${token}` } }),
+      fetch(locationURL, { headers: { authorization: `Bearer ${token}` } }),
+    ]);
+    if (postResponse.ok && locationResponse.ok) {
+      const [post, location] = await Promise.all([
+        postResponse.json() as Promise<FirestoreRestDocument>,
+        locationResponse.json() as Promise<FirestoreRestDocument>,
+      ]);
+      if (restString(post, 'userID') === uid
+        && restString(post, 'syntheticActorId') === 'sim-onboarding-first'
+        && restString(post, 'syntheticJourney') === 'first-user-v1'
+        && restString(post, 'syntheticSource') === 'visible-app-ui'
+        && restString(location, 'source') === 'post-upload'
+        && Math.abs(restNumber(location, 'latitude') - 43.6532) <= 0.000001
+        && Math.abs(restNumber(location, 'longitude') - (-79.3832)) <= 0.000001) {
+        return;
+      }
+      throw new Error('The isolated emulator returned a mismatched committed post.');
+    }
+    if (![200, 404].includes(postResponse.status)
+      || ![200, 404].includes(locationResponse.status)) {
+      throw new Error('The isolated committed post could not be verified.');
+    }
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  throw new Error('The isolated committed post did not become visible in time.');
+}
 
 export async function fetchRecentPosts(max = 40): Promise<Post[]> {
   const snap = await getDocs(query(postsCollection, orderBy('createdAt', 'desc'), limit(max)));
@@ -42,6 +117,8 @@ export async function uploadPostMedia(params: {
   usedAI?: boolean;
   radiusMeters?: number;
   rightsAttestationVersion?: string;
+  /** The poster's chosen clay pin model colour; absent keeps the pink pin. */
+  pinColor?: 'red' | 'purple' | 'blue' | 'green' | 'orange';
   sizeBytes?: number;
   onProgress?: (progress: number) => void;
 }) {
@@ -122,6 +199,7 @@ export async function uploadPostMedia(params: {
   }
 
   const nowMillis = Date.now();
+  const syntheticContext = syntheticOnboardingContext();
   const data: Record<string, unknown> = {
     userID: user.uid,
     username: user.displayName ?? user.email ?? 'Poplur user',
@@ -131,6 +209,7 @@ export async function uploadPostMedia(params: {
     radius: params.radiusMeters ?? 5000,
     createdAt: serverTimestamp(),
     createdAtMillis: nowMillis,
+    ...(syntheticContext?.metadata ?? {}),
   };
   if (uploadedStoragePath) data.mediaStoragePath = uploadedStoragePath;
 
@@ -162,6 +241,7 @@ export async function uploadPostMedia(params: {
   if (params.caption?.trim()) data.caption = params.caption.trim();
   if (params.channelId) data.channelId = params.channelId;
   if (params.filterId) data.filterId = params.filterId;
+  if (params.pinColor) data.pinColor = params.pinColor;
   if (params.usedAI) data.usedAI = true;
   if (params.rightsAttestationVersion?.trim()) {
     data.rightsAttestationVersion = params.rightsAttestationVersion.trim().slice(0, 80);
@@ -179,8 +259,18 @@ export async function uploadPostMedia(params: {
       source: 'post-upload',
     }, { merge: true });
   }
-  await batch.commit();
-  return mediaURL;
+  const commitOutcome = batch.commit().then(
+    () => ({ ok: true as const }),
+    error => ({ ok: false as const, error }),
+  );
+  const outcome = syntheticContext?.mode === ISOLATED_SYNTHETIC_ONBOARDING
+    ? await Promise.race([
+      commitOutcome,
+      waitForSyntheticPostCommit(user.uid, postRef.id).then(() => ({ ok: true as const })),
+    ])
+    : await commitOutcome;
+  if (!outcome.ok) throw outcome.error;
+  return { mediaURL, postId: postRef.id };
 }
 
 function toPost(document: any): Post {
@@ -198,6 +288,12 @@ function toPost(document: any): Post {
     longitude: numberOrUndefined(data.longitude),
     radius: Number(data.radius ?? 5000),
     viewCount: Number(data.viewCount ?? 0),
+    createdAtMillis: Number(data.createdAtMillis ?? data.createdAt?.toMillis?.() ?? 0),
+    locationVisibility: data.locationVisibility === 'approximate' ? 'approximate' : 'hidden',
+    syntheticJourney: data.syntheticJourney === 'first-user-v1'
+      || data.syntheticJourney === 'first-user-shared-v1'
+      ? data.syntheticJourney
+      : undefined,
     createdAt: data.createdAt?.toDate?.() ?? null
   };
 }

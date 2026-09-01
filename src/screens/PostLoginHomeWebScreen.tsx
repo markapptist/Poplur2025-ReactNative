@@ -14,7 +14,7 @@ import { collection, doc, getDoc, getDocs, limit, orderBy, query } from 'firebas
 import { httpsCallable } from 'firebase/functions';
 import { PreloginWebScreen } from './PreloginWebScreen';
 import { getCurrentProfile } from '../services/profile';
-import { fetchMyPosts, uploadPostMedia } from '../services/posts';
+import { fetchMyPosts, fetchRecentPosts, uploadPostMedia } from '../services/posts';
 import {
   closeDMThread,
   hideDMThread,
@@ -48,6 +48,7 @@ import { NativeWebCallSignalling } from '../services/webCallSignalling';
 import { PoplurInAppBrowser } from '../components/PoplurInAppBrowser';
 import { normalizePoplurBrowserUrl } from '../services/inAppBrowser';
 import { nativeAuthTokenDetail } from '../services/nativeAuthTokenBridge';
+import { uploadLimitBytes } from '../services/mediaResources';
 import {
   INACTIVE_NAVIGATOR_MOTION_DEMAND,
   navigatorMotionSampleRateHz,
@@ -64,6 +65,10 @@ import {
   WEB_HOME_IFRAME_ALLOW,
   WEB_HOME_PREVIEW_QUERY,
 } from '../services/webHomeEmbed';
+import {
+  ISOLATED_SYNTHETIC_ONBOARDING,
+  type SyntheticOnboardingMode,
+} from '../services/syntheticOnboarding';
 import claymapBundle from '../assets/claymap/bundle.json';
 
 // Post-login HOME web embed (RN parity with iOS/Android Phase 3).
@@ -191,6 +196,7 @@ type ClayMessage = {
   privateAccount?: boolean;
   ghostMode?: boolean;
   radiusKm?: number;
+  pinColor?: string;
   index?: number;
   sequence?: number;
   control?: string;
@@ -216,7 +222,6 @@ type ClayMessage = {
   scope?: 'once' | 'whileUsing' | BackgroundAudioScope;
   permission?: PrimerPermission;
   granted?: boolean;
-  url?: string;
   visible?: boolean;
   themeId?: string;
   active?: boolean;
@@ -234,6 +239,46 @@ function validatedHttpsUrl(value: unknown): string | null {
   } catch {
     return null;
   }
+}
+
+function validatedOnboardingMediaUrl(value: unknown): string | null {
+  const secure = validatedHttpsUrl(value);
+  if (secure) return secure;
+  if (typeof value !== 'string' || value.length > 4096) return null;
+  try {
+    const url = new URL(value);
+    if (url.username || url.password || url.origin !== 'http://127.0.0.1:9199') return null;
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+type SyntheticOnboardingProfile = {
+  username?: string;
+  accountType?: string;
+  photoURL?: string;
+};
+
+async function getSyntheticOnboardingProfile(): Promise<SyntheticOnboardingProfile | null> {
+  const user = auth.currentUser;
+  if (!user) return null;
+  const token = await user.getIdToken();
+  const endpoint = `http://127.0.0.1:8080/v1/projects/demo-poplur-first-user-v1/databases/(default)/documents/users/${encodeURIComponent(user.uid)}`;
+  const response = await fetch(endpoint, { headers: { authorization: `Bearer ${token}` } });
+  if (!response.ok) throw new Error('The isolated profile could not be loaded.');
+  const document = await response.json() as {
+    fields?: Record<string, { stringValue?: string }>;
+  };
+  if (document.fields?.syntheticActorId?.stringValue !== 'sim-onboarding-first'
+    || document.fields?.syntheticJourney?.stringValue !== 'first-user-v1') {
+    throw new Error('The isolated profile identity did not match.');
+  }
+  return {
+    username: document.fields?.username?.stringValue,
+    accountType: document.fields?.accountType?.stringValue,
+    photoURL: document.fields?.photoURL?.stringValue,
+  };
 }
 
 type MediaAsset = {
@@ -268,6 +313,23 @@ function clipLength(duration?: number | null) {
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
 }
 
+function syntheticTransferByteSize(value: unknown, kind: 'photo' | 'video'): number | null {
+  if (typeof value !== 'string') return null;
+  const limit = uploadLimitBytes(kind);
+  // A data URL is the only form produced when the browser shell converts a
+  // retained blob capture for the bridge. Bound its encoded length before the
+  // regular expression so a forged message cannot allocate an unbounded Blob.
+  if (value.length > Math.ceil(limit * 4 / 3) + 256) return null;
+  const media = kind === 'video'
+    ? /^data:video\/(?:mp4|quicktime|webm);base64,([a-zA-Z0-9+/]+={0,2})$/
+    : /^data:image\/(?:jpeg|jpg|png|webp);base64,([a-zA-Z0-9+/]+={0,2})$/;
+  const encoded = value.match(media)?.[1];
+  if (!encoded || encoded.length % 4 !== 0) return null;
+  const padding = encoded.endsWith('==') ? 2 : encoded.endsWith('=') ? 1 : 0;
+  const bytes = encoded.length / 4 * 3 - padding;
+  return Number.isSafeInteger(bytes) && bytes > 0 && bytes <= limit ? bytes : null;
+}
+
 type PermissionNeeds = {
   location: boolean;
   photos: boolean;
@@ -285,10 +347,15 @@ const WebHomeIframe = 'iframe' as unknown as React.ComponentType<{
 export function PostLoginHomeWebScreen({
   skipPermissionPrimer = false,
   forcePermissionPrimer = false,
+  syntheticOnboardingMode = null,
 }: {
   skipPermissionPrimer?: boolean;
   forcePermissionPrimer?: boolean;
+  syntheticOnboardingMode?: SyntheticOnboardingMode | null;
 } = {}) {
+  const syntheticOnboarding = syntheticOnboardingMode !== null;
+  const isolatedSyntheticOnboarding =
+    syntheticOnboardingMode === ISOLATED_SYNTHETIC_ONBOARDING;
   const webViewRef = useRef<WebView>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const serverRef = useRef<Server | null>(null);
@@ -332,6 +399,7 @@ export function PostLoginHomeWebScreen({
   const dmOpenThreadIdRef = useRef<string | null>(null);
   const notificationStopRef = useRef<(() => void) | null>(null);
   const notificationIdsRef = useRef<string[]>([]);
+  const handleMessageRef = useRef<(event: WebViewMessageEvent) => void>(() => {});
 
   useEffect(() => {
     let active = true;
@@ -414,6 +482,12 @@ export function PostLoginHomeWebScreen({
       `window.poplurProfile?.(${payload});` +
         `window.dispatchEvent(new CustomEvent('poplur-native-profile',{detail:${payload}}));true;`,
     );
+    iframeRef.current?.contentWindow?.postMessage({
+      type: 'poplur-rn-shell-dispatch',
+      kind: 'event',
+      eventName: 'poplur-native-profile',
+      detail,
+    }, WEB_HOME_ORIGIN);
   };
 
   const sendProfileToWeb = async () => {
@@ -422,9 +496,13 @@ export function PostLoginHomeWebScreen({
     // never turn an authenticated account into an ownerless Profile grid.
     const uid = auth.currentUser?.uid?.trim();
     try {
-      const profile = await getCurrentProfile();
+      const profile = isolatedSyntheticOnboarding
+        ? await getSyntheticOnboardingProfile()
+        : await getCurrentProfile();
       const username = profile?.username?.trim();
-      const photo = validatedHttpsUrl(profile?.photoURL);
+      const photo = isolatedSyntheticOnboarding
+        ? validatedOnboardingMediaUrl(profile?.photoURL)
+        : validatedHttpsUrl(profile?.photoURL);
       dispatchProfileToWeb({
         ...(uid ? { uid } : {}),
         ...(username ? { username } : {}),
@@ -489,7 +567,7 @@ export function PostLoginHomeWebScreen({
 
   useEffect(() => {
     let active = true;
-    void getCurrentProfile()
+    void (isolatedSyntheticOnboarding ? getSyntheticOnboardingProfile() : getCurrentProfile())
       .then(profile => {
         const username = profile?.username?.trim();
         if (active && username) {
@@ -502,12 +580,12 @@ export function PostLoginHomeWebScreen({
         if (active) setProfileReady(true);
       });
     return () => { active = false; };
-  }, []);
+  }, [isolatedSyntheticOnboarding]);
 
   useEffect(() => {
     let active = true;
     const resolvePermissionNeeds = async () => {
-      if (skipPermissionPrimer) {
+      if (skipPermissionPrimer || syntheticOnboarding) {
         if (active) setPermissionNeeds({ location: false, photos: false });
         return;
       }
@@ -538,7 +616,7 @@ export function PostLoginHomeWebScreen({
     };
     void resolvePermissionNeeds();
     return () => { active = false; };
-  }, [forcePermissionPrimer, skipPermissionPrimer]);
+  }, [forcePermissionPrimer, skipPermissionPrimer, syntheticOnboarding]);
 
   useEffect(() => {
     let cancelled = false;
@@ -575,6 +653,12 @@ export function PostLoginHomeWebScreen({
     webViewRef.current?.injectJavaScript(
       `window.dispatchEvent(new CustomEvent(${name}, { detail: ${payload} })); true;`,
     );
+    iframeRef.current?.contentWindow?.postMessage({
+      type: 'poplur-rn-shell-dispatch',
+      kind: 'event',
+      eventName,
+      detail,
+    }, WEB_HOME_ORIGIN);
   }, []);
 
   const sendAuthTokenToWeb = useCallback(async () => {
@@ -680,6 +764,38 @@ export function PostLoginHomeWebScreen({
   const sendFeedPostsToWeb = useCallback(async () => {
     if (!auth.currentUser?.uid) return;
     try {
+      if (isolatedSyntheticOnboarding) {
+        const posts = await fetchRecentPosts(96);
+        const rows = posts.flatMap(post => {
+          if (post.syntheticJourney !== 'first-user-v1') return [];
+          const mediaURL = validatedOnboardingMediaUrl(post.mediaURL);
+          if (!mediaURL) return [];
+          const posterURL = validatedOnboardingMediaUrl(post.posterURL);
+          return [{
+            id: post.id,
+            ownerId: post.userID,
+            mediaURL,
+            mediaType: post.mediaType.includes('video') ? 'video' : 'photo',
+            ...(posterURL ? { posterURL } : {}),
+            username: post.username?.trim() || 'Poplur user',
+            caption: post.caption,
+            channelId: post.channelId?.trim() || 'live',
+            radiusMeters: Math.max(0, Number(post.radius) || 0),
+            createdAtMillis: post.createdAtMillis ?? post.createdAt?.getTime?.() ?? 0,
+            viewCount: Math.max(0, Number(post.viewCount) || 0),
+            locationVisibility: post.locationVisibility === 'approximate'
+              ? 'approximate' as const
+              : 'hidden' as const,
+            ...(post.locationVisibility === 'approximate'
+              && Number.isFinite(post.latitude) && Number.isFinite(post.longitude)
+              ? { originLatitude: post.latitude, originLongitude: post.longitude }
+              : {}),
+            syntheticJourney: 'first-user-v1' as const,
+          }];
+        });
+        dispatchToClay('poplur-native-feed-posts', { posts: rows });
+        return;
+      }
       const snapshot = await getDocs(query(
         collection(db, 'posts'),
         orderBy('createdAt', 'desc'),
@@ -746,7 +862,7 @@ export function PostLoginHomeWebScreen({
     } catch (error) {
       console.warn('[PostLoginHomeWebScreen] feed posts bridge failed', error);
     }
-  }, [dispatchToClay]);
+  }, [dispatchToClay, isolatedSyntheticOnboarding]);
 
   const sendNearbyTracksToWeb = useCallback(async (message: ClayMessage) => {
     const requestId = typeof message.requestId === 'string' ? message.requestId : '';
@@ -857,6 +973,20 @@ export function PostLoginHomeWebScreen({
   const requestAndPushLocation = useCallback(async () => {
     await markPermissionPrimerHandled('location').catch(error =>
       console.warn('[PostLoginHomeWebScreen] location primer state save failed', error));
+    if (syntheticOnboarding && Platform.OS === 'web') {
+      const payload = {
+        type: 'poplur-location',
+        latitude: 43.6532,
+        longitude: -79.3832,
+      };
+      dispatchToClay('poplur-location', payload);
+      iframeRef.current?.contentWindow?.postMessage({
+        type: 'poplur-rn-shell-dispatch',
+        kind: 'message',
+        detail: payload,
+      }, WEB_HOME_ORIGIN);
+      return;
+    }
     // The custom clay primer is the only startup permission UI. Reuse an
     // existing grant, but never stack the Expo/OS sheet on top of that card.
     const permission = await Location.getForegroundPermissionsAsync();
@@ -881,13 +1011,65 @@ export function PostLoginHomeWebScreen({
       })();
       true;
     `);
-  }, []);
+  }, [dispatchToClay, syntheticOnboarding]);
+
+  useEffect(() => {
+    if (!syntheticOnboarding || Platform.OS !== 'web' || !homeReady) return;
+    // Seed the exact emulator-only fix before Camera parks its draft for Map.
+    // The later explicit request remains supported, but it no longer races the
+    // first focused-picker iframe mount.
+    void requestAndPushLocation();
+  }, [homeReady, requestAndPushLocation, syntheticOnboarding]);
 
   const materializeCapture = useCallback(async (asset: MediaAsset) => {
+    const kind = assetKind(asset);
+    if (syntheticOnboarding && Platform.OS === 'web') {
+      const response = await fetch(asset.uri);
+      if (!response.ok && response.status !== 0) {
+        throw new Error(`The selected media could not be read (${response.status}).`);
+      }
+      const blob = await response.blob();
+      const maximum = kind === 'video' ? 40 * 1024 * 1024 : 12 * 1024 * 1024;
+      if (blob.size <= 0 || blob.size > maximum) {
+        throw new Error(`Choose a ${kind} under ${kind === 'video' ? '40' : '12'} MB.`);
+      }
+      captureCacheKeysRef.current.forEach(record => record.release());
+      poplurAssetCache.purgeMatching(
+        key => key.startsWith(captureSessionPrefixRef.current),
+        true,
+      );
+      captureCacheKeysRef.current.clear();
+      const cacheKey = `${captureSessionPrefixRef.current}synthetic-${Date.now()}`;
+      const admission = poplurAssetCache.admit({
+        key: cacheKey,
+        kind: kind === 'video' ? 'video' : 'temporary',
+        value: asset.uri,
+        estimatedBytes: blob.size,
+      });
+      if (!admission.admitted) {
+        throw new Error(`The selected media exceeded Poplur's active cache budget (${admission.reason}).`);
+      }
+      const lease = poplurAssetCache.retain<string>(cacheKey);
+      if (!lease) {
+        poplurAssetCache.delete(cacheKey, true);
+        throw new Error('The selected media could not be retained safely.');
+      }
+      captureCacheKeysRef.current.set(asset.uri, {
+        key: cacheKey,
+        sizeBytes: blob.size,
+        release: lease.release,
+      });
+      return {
+        kind,
+        src: asset.uri,
+        length: kind === 'video' ? clipLength(asset.duration) : undefined,
+        width: kind === 'photo' && asset.width && asset.width > 0 ? asset.width : undefined,
+        height: kind === 'photo' && asset.height && asset.height > 0 ? asset.height : undefined,
+      };
+    }
     const root = bundleRootRef.current;
     if (!root || !origin) throw new Error('The Poplur camera is still starting. Try again in a moment.');
 
-    const kind = assetKind(asset);
     const extension = assetExtension(asset, kind);
     const filename = `capture-${Date.now()}-${Math.random().toString(36).slice(2, 9)}.${extension}`;
     // The static server needs a filesystem path, while Expo FileSystem requires
@@ -937,17 +1119,19 @@ export function PostLoginHomeWebScreen({
       width: kind === 'photo' && asset.width && asset.width > 0 ? asset.width : undefined,
       height: kind === 'photo' && asset.height && asset.height > 0 ? asset.height : undefined,
     };
-  }, [origin]);
+  }, [origin, syntheticOnboarding]);
 
   const pickCapture = useCallback(async (
     source: 'camera' | 'library',
     requestedKind: 'photo' | 'video' | 'all',
     delivery: 'composer' | 'cameraRoll' = 'composer',
   ) => {
-    const permission = source === 'camera'
-      ? await ImagePicker.requestCameraPermissionsAsync()
-      : await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) throw new Error(`${source === 'camera' ? 'Camera' : 'Photo library'} access was not allowed.`);
+    if (!(syntheticOnboarding && Platform.OS === 'web')) {
+      const permission = source === 'camera'
+        ? await ImagePicker.requestCameraPermissionsAsync()
+        : await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) throw new Error(`${source === 'camera' ? 'Camera' : 'Photo library'} access was not allowed.`);
+    }
 
     const mediaTypes = requestedKind === 'video'
       ? ImagePicker.MediaTypeOptions.Videos
@@ -976,7 +1160,7 @@ export function PostLoginHomeWebScreen({
       delivery === 'cameraRoll' ? 'poplur-native-camera-roll-selection' : 'poplur-native-capture',
       capture,
     );
-  }, [dispatchToClay, materializeCapture]);
+  }, [dispatchToClay, materializeCapture, syntheticOnboarding]);
 
   const publishPost = useCallback(async (message: ClayMessage) => {
     const requestId = message.requestId;
@@ -987,11 +1171,17 @@ export function PostLoginHomeWebScreen({
       }
       const kind = message.kind === 'video' ? 'video' : 'photo';
       const captureRecord = captureCacheKeysRef.current.get(message.data);
-      await uploadPostMedia({
+      const transferredSize = syntheticOnboarding && Platform.OS === 'web' && !captureRecord
+        ? syntheticTransferByteSize(message.data, kind)
+        : null;
+      if (syntheticOnboarding && Platform.OS === 'web' && !captureRecord && transferredSize === null) {
+        throw new Error('The isolated browser capture could not be size-verified.');
+      }
+      const uploaded = await uploadPostMedia({
         uri: message.data,
         mediaType: kind,
         postId: message.postId,
-        sizeBytes: captureRecord?.sizeBytes,
+        sizeBytes: captureRecord?.sizeBytes ?? transferredSize ?? undefined,
         targetLatitude: Number.isFinite(message.targetLatitude) ? message.targetLatitude : undefined,
         targetLongitude: Number.isFinite(message.targetLongitude) ? message.targetLongitude : undefined,
         locationVisibility: message.locationVisibility === 'hidden' ? 'hidden' : 'approximate',
@@ -1001,8 +1191,58 @@ export function PostLoginHomeWebScreen({
         usedAI: message.usedAI,
         radiusMeters: Number.isFinite(message.radiusKm) ? Math.round(Number(message.radiusKm) * 1000) : undefined,
         rightsAttestationVersion: message.rightsAttestationVersion,
+        pinColor: typeof message.pinColor === 'string'
+          && ['red', 'purple', 'blue', 'green', 'orange'].includes(message.pinColor)
+          ? message.pinColor as 'red' | 'purple' | 'blue' | 'green' | 'orange'
+          : undefined,
       });
-      dispatchToClay('poplur-upload-result', { requestId, ok: true });
+      dispatchToClay('poplur-upload-result', {
+        requestId,
+        ok: true,
+        postId: uploaded.postId,
+      });
+      // Home's initial feed request occurs before this post exists. In the
+      // isolated browser journey, publish the exact committed row immediately
+      // instead of making upload acknowledgement depend on a second Firestore
+      // query. The runner independently proves the same post, location and
+      // Storage objects through the emulator admin APIs before it accepts the
+      // Map/Profile frames.
+      if (isolatedSyntheticOnboarding) {
+        const owner = auth.currentUser;
+        const mediaURL = validatedOnboardingMediaUrl(uploaded.mediaURL);
+        if (!owner || !mediaURL) {
+          throw new Error('The isolated committed post could not be projected into Poplur.');
+        }
+        const locationVisibility = Number.isFinite(message.targetLatitude)
+          && Number.isFinite(message.targetLongitude)
+          && message.locationVisibility !== 'hidden'
+          ? 'approximate' as const
+          : 'hidden' as const;
+        dispatchToClay('poplur-native-feed-posts', {
+          posts: [{
+            id: uploaded.postId,
+            ownerId: owner.uid,
+            mediaURL,
+            mediaType: kind,
+            username: owner.displayName?.trim() || owner.email?.trim() || 'Poplur user',
+            caption: message.caption,
+            channelId: message.channelId?.trim() || 'live',
+            radiusMeters: Number.isFinite(message.radiusKm)
+              ? Math.max(0, Math.round(Number(message.radiusKm) * 1_000))
+              : 0,
+            createdAtMillis: Date.now(),
+            viewCount: 0,
+            locationVisibility,
+            ...(locationVisibility === 'approximate'
+              ? {
+                originLatitude: message.targetLatitude,
+                originLongitude: message.targetLongitude,
+              }
+              : {}),
+            syntheticJourney: 'first-user-v1' as const,
+          }],
+        });
+      }
       if (captureRecord) {
         captureCacheKeysRef.current.delete(message.data);
         captureRecord.release();
@@ -1016,7 +1256,7 @@ export function PostLoginHomeWebScreen({
         error: error instanceof Error ? error.message : fallback,
       });
     }
-  }, [dispatchToClay]);
+  }, [dispatchToClay, isolatedSyntheticOnboarding, syntheticOnboarding]);
 
   const openInAppBrowser = useCallback((value: unknown) => {
     const url = normalizePoplurBrowserUrl(value);
@@ -1045,6 +1285,11 @@ export function PostLoginHomeWebScreen({
       .replace(/>/g, '\\u003e')
       .replace(/&/g, '\\u0026');
     webViewRef.current?.injectJavaScript(`window.postMessage(${json}, '*'); true;`);
+    iframeRef.current?.contentWindow?.postMessage({
+      type: 'poplur-rn-shell-dispatch',
+      kind: 'message',
+      detail: payload,
+    }, WEB_HOME_ORIGIN);
   }, []);
 
   useEffect(() => {
@@ -1261,7 +1506,9 @@ export function PostLoginHomeWebScreen({
           console.warn('[PostLoginHomeWebScreen] location request failed', error));
       }
       if (message.type === 'requestCameraPermission') {
-        void ImagePicker.requestCameraPermissionsAsync();
+        if (!(syntheticOnboarding && Platform.OS === 'web')) {
+          void ImagePicker.requestCameraPermissionsAsync();
+        }
       }
       if (message.type === 'cameraLiveVisibilityChanged') {
         cameraLiveVisibleRef.current = message.visible === true;
@@ -1319,6 +1566,21 @@ export function PostLoginHomeWebScreen({
       // Non-JSON messages are ignored.
     }
   };
+  handleMessageRef.current = handleMessage;
+
+  useEffect(() => {
+    if (!syntheticOnboarding || Platform.OS !== 'web') return;
+    const receiveRNWebShellEvent = (event: MessageEvent) => {
+      if (event.origin !== WEB_HOME_ORIGIN || event.source !== iframeRef.current?.contentWindow) return;
+      const message = event.data as { type?: unknown; data?: unknown } | null;
+      if (!message || message.type !== 'poplur-rn-shell-event' || typeof message.data !== 'string') return;
+      handleMessageRef.current({
+        nativeEvent: { data: message.data },
+      } as WebViewMessageEvent);
+    };
+    window.addEventListener('message', receiveRNWebShellEvent);
+    return () => window.removeEventListener('message', receiveRNWebShellEvent);
+  }, [syntheticOnboarding]);
 
   const permissionQuery = permissionNeeds
     ? `${permissionNeeds.location ? '&askLocation=1' : ''}${permissionNeeds.photos ? '&askPhotos=1' : ''}`
@@ -1328,6 +1590,9 @@ export function PostLoginHomeWebScreen({
   // map keeps its 3D look while using the same constrained GPU budget as the
   // native shells. Native devices already select their own performance tier.
   const webMapQuery = Platform.OS === 'web' ? WEB_HOME_PREVIEW_QUERY : '';
+  const rnWebTransportQuery = syntheticOnboarding && Platform.OS === 'web'
+    ? isolatedSyntheticOnboarding ? '&rnWebShell=1' : '&rnWebBridge=1'
+    : '';
   const backgroundAudioBootstrapScript = backgroundAudioBootstrap(
     backgroundAudioPreference ?? { enabled: false, scope: 'screen' },
   );
@@ -1336,7 +1601,7 @@ export function PostLoginHomeWebScreen({
     // Include the archive version in the page URL too. Native WebViews cache
     // index.html aggressively; this prevents a fresh extracted bundle from
     // reopening a stale home page from their HTTP cache.
-    ? `${origin}/index.html?view=home&tabs=0&bundle=${BUNDLE_CACHE_KEY}${profileQuery}${permissionQuery}${webMapQuery}`
+    ? `${origin}/index.html?view=home&tabs=0&bundle=${BUNDLE_CACHE_KEY}${profileQuery}${permissionQuery}${webMapQuery}${rnWebTransportQuery}`
     : null;
 
   return (

@@ -13,6 +13,9 @@ export type Post = {
   longitude?: number;
   radius: number;
   viewCount: number;
+  createdAtMillis?: number;
+  locationVisibility?: 'approximate' | 'hidden';
+  syntheticJourney?: 'first-user-v1' | 'first-user-shared-v1';
   createdAt?: Date | null;
 };
 
