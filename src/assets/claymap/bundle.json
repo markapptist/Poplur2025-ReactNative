@@ -3,5 +3,5 @@
   "produce": "run poplur-clay-map/scripts/sync-mobile.sh",
   "bundleVersion": "97",
   "bytes": 117715856,
-  "sha256": "edee68ceb484b9489001501999a8dc009a0b7369778ea9f33dec80d903b07d4a"
+  "sha256": "3561882a473827ddc51686681b05bced615e0956e9fa7001773c0b508470e746"
 }
