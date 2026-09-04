@@ -2,6 +2,6 @@
   "_": "Identity of the clay map bundle this app expects. The zip itself is a build artifact and is gitignored; see .gitignore for why.",
   "produce": "run poplur-clay-map/scripts/sync-mobile.sh",
   "bundleVersion": "97",
-  "bytes": 118047102,
-  "sha256": "b36c12971513d947327601319cfbde304786d196ff539757fa7af55e94d5cd61"
+  "bytes": 118047128,
+  "sha256": "9691ef3b02973003fd0a4dad2c6f5d689c4d27fcfae80e4d746d8067d458ad54"
 }
