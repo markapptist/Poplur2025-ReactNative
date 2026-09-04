@@ -67,6 +67,7 @@ import {
 } from '../services/webHomeEmbed';
 import {
   ISOLATED_SYNTHETIC_ONBOARDING,
+  resolveSyntheticLocation,
   type SyntheticOnboardingMode,
 } from '../services/syntheticOnboarding';
 import claymapBundle from '../assets/claymap/bundle.json';
@@ -974,10 +975,13 @@ export function PostLoginHomeWebScreen({
     await markPermissionPrimerHandled('location').catch(error =>
       console.warn('[PostLoginHomeWebScreen] location primer state save failed', error));
     if (syntheticOnboarding && Platform.OS === 'web') {
+      // The managed fix: Toronto for the first-user journeys, the actor's own
+      // city for the live cohort. Never a real device position.
+      const managed = resolveSyntheticLocation(syntheticOnboardingMode);
       const payload = {
         type: 'poplur-location',
-        latitude: 43.6532,
-        longitude: -79.3832,
+        latitude: managed.latitude,
+        longitude: managed.longitude,
       };
       dispatchToClay('poplur-location', payload);
       iframeRef.current?.contentWindow?.postMessage({

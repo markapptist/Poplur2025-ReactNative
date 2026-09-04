@@ -12,6 +12,13 @@ import {
 
 const postsCollection = collection(db, 'posts');
 
+/**
+ * The reach a post is granted at birth so it can be found before it has earned
+ * anything. It is capped at the same 5 km the security rules allow a post to be
+ * created with, and it never counts toward the author's entitlement.
+ */
+export const POST_DISCOVERY_SEED_METERS = 5000;
+
 function syntheticOnboardingContext() {
   const mode = resolveSyntheticOnboardingMode();
   const metadata = syntheticOnboardingMetadata(mode);
@@ -200,13 +207,21 @@ export async function uploadPostMedia(params: {
 
   const nowMillis = Date.now();
   const syntheticContext = syntheticOnboardingContext();
+  // Every post is born with a discovery seed, because a pop nobody can see can
+  // never earn the reach that would let it be seen. The seed is reach only: it
+  // is recorded separately and the account total that grants a claim is summed
+  // from earned radius alone, so publishing more posts never buys more ground.
+  const seedMeters = POST_DISCOVERY_SEED_METERS;
+  const requestedMeters = Math.max(0, Math.round(params.radiusMeters ?? 0));
   const data: Record<string, unknown> = {
     userID: user.uid,
     username: user.displayName ?? user.email ?? 'Poplur user',
     mediaURL,
     mediaType: params.mediaType,
     viewCount: 0,
-    radius: params.radiusMeters ?? 5000,
+    radius: Math.max(requestedMeters, seedMeters),
+    seedRadiusMeters: seedMeters,
+    organicRadiusMeters: 0,
     createdAt: serverTimestamp(),
     createdAtMillis: nowMillis,
     ...(syntheticContext?.metadata ?? {}),

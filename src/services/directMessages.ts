@@ -52,6 +52,17 @@ function signedInUid(): string {
   return uid;
 }
 
+/**
+ * The name the other side should see for this account. Without it a thread
+ * this client creates renders as an eight-character uid stub in their Mail
+ * list, because `participantNames` is the only name source there.
+ */
+function signedInDisplayName(): string {
+  const user = auth.currentUser;
+  const name = user?.displayName?.trim() || user?.email?.split('@')[0]?.trim() || '';
+  return name.slice(0, 80);
+}
+
 function millis(value: unknown): number {
   if (!value || typeof value !== 'object') return 0;
   const toMillis = (value as { toMillis?: unknown }).toMillis;
@@ -257,12 +268,16 @@ export async function sendDM(
   const messageRef = doc(threadRef, 'messages', messageId);
   if ((await getDoc(messageRef)).exists()) return;
   const batch = writeBatch(db);
+  const myName = signedInDisplayName();
   batch.set(threadRef, {
     participants: [me, other].sort(),
     lastMessage: messageText,
     lastSenderId: me,
     updatedAt: serverTimestamp(),
     unreadBy: { [me]: 0, [other]: increment(1) },
+    // Name only ourselves. The roster is fixed by the rules, and claiming a
+    // name for the other participant would let a sender relabel them.
+    ...(myName ? { participantNames: { [me]: myName } } : {}),
   }, { merge: true });
   batch.set(messageRef, {
     senderId: me,
