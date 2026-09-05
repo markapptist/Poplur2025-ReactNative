@@ -1,3 +1,4 @@
+import { commitDMIfNew } from './dmSendAttempt';
 import {
   collection,
   deleteField,
@@ -266,7 +267,6 @@ export async function sendDM(
   const threadId = canonicalDMThreadId(me, other);
   const threadRef = doc(db, 'dmThreads', threadId);
   const messageRef = doc(threadRef, 'messages', messageId);
-  if ((await getDoc(messageRef)).exists()) return;
   const batch = writeBatch(db);
   const myName = signedInDisplayName();
   batch.set(threadRef, {
@@ -286,7 +286,7 @@ export async function sendDM(
     kind: 'text',
     createdAt: serverTimestamp(),
   });
-  await batch.commit();
+  await commitDMIfNew(async () => (await getDoc(messageRef)).exists(), () => batch.commit());
 }
 
 async function markDMThreadRead(threadId: string): Promise<void> {
