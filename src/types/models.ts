@@ -1,6 +1,7 @@
 export type AppTab = 'map' | 'record' | 'feed' | 'profile' | 'settings';
 
 export type Post = {
+  photoViewSeconds?: number;
   id: string;
   userID: string;
   username?: string;

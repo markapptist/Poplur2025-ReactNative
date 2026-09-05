@@ -124,6 +124,7 @@ export async function uploadPostMedia(params: {
   usedAI?: boolean;
   radiusMeters?: number;
   rightsAttestationVersion?: string;
+  photoViewSeconds?: number | null;
   /** The poster's chosen clay pin model colour; absent keeps the pink pin. */
   pinColor?: 'red' | 'purple' | 'blue' | 'green' | 'orange';
   sizeBytes?: number;
@@ -258,6 +259,9 @@ export async function uploadPostMedia(params: {
   if (params.filterId) data.filterId = params.filterId;
   if (params.pinColor) data.pinColor = params.pinColor;
   if (params.usedAI) data.usedAI = true;
+  if (params.mediaType === 'photo' && typeof params.photoViewSeconds === 'number' && Number.isFinite(params.photoViewSeconds) && params.photoViewSeconds > 0) {
+    data.photoViewSeconds = Math.min(60, Math.max(1, Math.round(params.photoViewSeconds)));
+  }
   if (params.rightsAttestationVersion?.trim()) {
     data.rightsAttestationVersion = params.rightsAttestationVersion.trim().slice(0, 80);
     data.rightsAttestedAtMillis = nowMillis;
@@ -296,6 +300,7 @@ function toPost(document: any): Post {
     username: data.username,
     mediaURL: data.mediaURL ?? '',
     mediaType: data.mediaType ?? 'photo',
+    photoViewSeconds: numberOrUndefined(data.photoViewSeconds),
     posterURL: data.posterURL,
     caption: data.caption,
     channelId: data.channelId,

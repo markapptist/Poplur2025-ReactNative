@@ -189,6 +189,7 @@ type ClayMessage = {
   usedAI?: boolean;
   rightsAttested?: boolean;
   rightsAttestationVersion?: string;
+  photoViewSeconds?: number | null;
   latitude?: number;
   longitude?: number;
   targetLatitude?: number;
@@ -751,6 +752,7 @@ export function PostLoginHomeWebScreen({
           id: post.id,
           mediaURL: post.mediaURL,
           mediaType: post.mediaType,
+          photoViewSeconds: post.photoViewSeconds,
           posterURL: post.posterURL,
           caption: post.caption,
           channelId: post.channelId,
@@ -777,6 +779,7 @@ export function PostLoginHomeWebScreen({
             ownerId: post.userID,
             mediaURL,
             mediaType: post.mediaType.includes('video') ? 'video' : 'photo',
+            photoViewSeconds: post.photoViewSeconds,
             ...(posterURL ? { posterURL } : {}),
             username: post.username?.trim() || 'Poplur user',
             caption: post.caption,
@@ -824,6 +827,7 @@ export function PostLoginHomeWebScreen({
         const row: Record<string, unknown> = {
           id: document.id,
           mediaURL,
+          photoViewSeconds: numberValue(data.photoViewSeconds),
           mediaType: data.mediaType === 'photo' || data.mediaType === 'image'
             ? 'photo'
             : data.mediaType === 'video' ? 'video' : inferredMediaType,
@@ -1195,6 +1199,7 @@ export function PostLoginHomeWebScreen({
         usedAI: message.usedAI,
         radiusMeters: Number.isFinite(message.radiusKm) ? Math.round(Number(message.radiusKm) * 1000) : undefined,
         rightsAttestationVersion: message.rightsAttestationVersion,
+        photoViewSeconds: message.photoViewSeconds,
         pinColor: typeof message.pinColor === 'string'
           && ['red', 'purple', 'blue', 'green', 'orange'].includes(message.pinColor)
           ? message.pinColor as 'red' | 'purple' | 'blue' | 'green' | 'orange'
