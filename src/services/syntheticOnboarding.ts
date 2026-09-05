@@ -1,7 +1,8 @@
 export const ISOLATED_SYNTHETIC_ONBOARDING = 'first-user-v1' as const;
 export const SHARED_SYNTHETIC_ONBOARDING = 'first-user-shared-v1' as const;
 /**
- * The five provisioned beta runner accounts using the real app on production.
+ * The eight provisioned beta runner accounts (five people, three businesses)
+ * using the real app on production.
  * Same shell behaviour as the shared first user (managed Toronto location, no
  * permission primers), but every post is stamped with the actor that made it.
  */
@@ -19,6 +20,10 @@ export const LIVE_COHORT_ACTOR_IDS = Object.freeze([
   'sim-music-003',
   'sim-tech-004',
   'sim-news-005',
+  // Business testers — listed businesses provisioned the same way.
+  'sim-biz-food-006',
+  'sim-biz-shop-007',
+  'sim-biz-fashion-008',
 ]);
 
 type BrowserLocation = Pick<Location, 'hostname' | 'search'>;
