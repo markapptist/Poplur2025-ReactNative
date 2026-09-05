@@ -212,15 +212,20 @@ export async function uploadPostMedia(params: {
   // never earn the reach that would let it be seen. The seed is reach only: it
   // is recorded separately and the account total that grants a claim is summed
   // from earned radius alone, so publishing more posts never buys more ground.
-  const seedMeters = POST_DISCOVERY_SEED_METERS;
+  // Ground claimed on top of the discovery seed (the map picker, up to the
+  // account's earned total) is seed too: spent reach, never earned. Declaring
+  // only the 5 km floor left the claim above it undeclared, which the rules
+  // refused outright and the engagement functions would have read as radius
+  // earned from nowhere.
   const requestedMeters = Math.max(0, Math.round(params.radiusMeters ?? 0));
+  const seedMeters = Math.max(requestedMeters, POST_DISCOVERY_SEED_METERS);
   const data: Record<string, unknown> = {
     userID: user.uid,
     username: user.displayName ?? user.email ?? 'Poplur user',
     mediaURL,
     mediaType: params.mediaType,
     viewCount: 0,
-    radius: Math.max(requestedMeters, seedMeters),
+    radius: seedMeters,
     seedRadiusMeters: seedMeters,
     organicRadiusMeters: 0,
     createdAt: serverTimestamp(),
