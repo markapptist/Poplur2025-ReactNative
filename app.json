@@ -1,4 +1,8 @@
 {
+  "react-native-google-mobile-ads": {
+    "android_app_id": "ca-app-pub-2086359936541081~4441297400",
+    "ios_app_id": "ca-app-pub-2086359936541081~4441297400"
+  },
   "expo": {
     "name": "Poplur",
     "slug": "poplur2025-react-native",
