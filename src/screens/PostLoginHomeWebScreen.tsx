@@ -1457,8 +1457,10 @@ export function PostLoginHomeWebScreen({
         const title = message.title?.trim() || 'Poplur';
         const user = message.user?.trim();
         const suppliedLink = validatedHttpsUrl(message.link ?? message.url);
+        // The page's own profilePostShareUrl: poplur.ca with the id as ?pop=
+        // (poplur.com has no DNS).
         const postLink = message.postId
-          ? `https://poplur.com/p/${encodeURIComponent(message.postId)}`
+          ? `https://www.poplur.ca/?pop=${encodeURIComponent(message.postId)}`
           : null;
         // A post id is the canonical identity. Never let a caller-supplied
         // channel/generic URL collapse distinct posts onto one share link.
